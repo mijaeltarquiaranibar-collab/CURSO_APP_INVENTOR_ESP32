@@ -1,13 +1,127 @@
-#define LED 2
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+// ==========================
+// LEDS
+// ==========================
+#define LED1 12
+#define LED2 13
+#define LED3 14
+
+// ==========================
+// PULSADORES FISICOS
+// ==========================
+#define BOTON1 16
+#define BOTON2 17
+#define BOTON3 18
+
+// Estados de los LEDs controlados por App Inventor
+bool appLED1 = false;
+bool appLED2 = false;
+bool appLED3 = false;
+
+// Para detectar cambios en los botones físicos
+bool estadoBoton1Anterior = LOW;
+bool estadoBoton2Anterior = LOW;
+bool estadoBoton3Anterior = LOW;
 
 void setup() {
-  pinMode(LED, OUTPUT);
+
+  Serial.begin(115200);
+
+  // Bluetooth
+  SerialBT.begin("ESP32_CONTROL_LEDS");
+
+  Serial.println("ESP32 listo");
+  Serial.println("Bluetooth: ESP32_CONTROL_LEDS");
+
+  // LEDs
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+
+  // Pulsadores con PULL-DOWN externo
+  pinMode(BOTON1, INPUT);
+  pinMode(BOTON2, INPUT);
+  pinMode(BOTON3, INPUT);
+
+  // LEDs apagados
+  digitalWrite(LED1, LOW);
+  digitalWrite(LED2, LOW);
+  digitalWrite(LED3, LOW);
 }
 
 void loop() {
-  digitalWrite(LED, HIGH);
-  delay(1000);
 
-  digitalWrite(LED, LOW);
-  delay(1000);
+  // =================================================
+  // 1. RECIBIR COMANDOS DESDE APP INVENTOR
+  // =================================================
+
+  if (SerialBT.available()) {
+
+    String comando = SerialBT.readStringUntil('\n');
+    comando.trim();
+
+    Serial.print("Comando recibido: ");
+    Serial.println(comando);
+
+    // LED 1
+    if (comando == "LED1") {
+      appLED1 = !appLED1;
+    }
+
+    // LED 2
+    if (comando == "LED2") {
+      appLED2 = !appLED2;
+    }
+
+    // LED 3
+    if (comando == "LED3") {
+      appLED3 = !appLED3;
+    }
+  }
+
+
+  // =================================================
+  // 2. LEER PULSADORES FISICOS
+  // =================================================
+
+  bool boton1 = digitalRead(BOTON1);
+  bool boton2 = digitalRead(BOTON2);
+  bool boton3 = digitalRead(BOTON3);
+
+
+  // =================================================
+  // 3. CONTROL DE LOS LEDS
+  // =================================================
+
+  // LED 1
+  if (boton1 == HIGH || appLED1 == true) {
+    digitalWrite(LED1, HIGH);
+  } 
+  else {
+    digitalWrite(LED1, LOW);
+  }
+
+
+  // LED 2
+  if (boton2 == HIGH || appLED2 == true) {
+    digitalWrite(LED2, HIGH);
+  } 
+  else {
+    digitalWrite(LED2, LOW);
+  }
+
+
+  // LED 3
+  if (boton3 == HIGH || appLED3 == true) {
+    digitalWrite(LED3, HIGH);
+  } 
+  else {
+    digitalWrite(LED3, LOW);
+  }
+
+
+  delay(10);
 }
