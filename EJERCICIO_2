@@ -1,0 +1,555 @@
+// ==========================================================
+// ESP32 + 3 PULSADORES + BUZZER PASIVO + BLUETOOTH
+// ==========================================================
+// BOTON 1 -> GPIO 16 -> Melodía videojuego
+// BOTON 2 -> GPIO 17 -> Melodía Star Wars
+// BOTON 3 -> GPIO 18 -> Alarma
+//
+// BUZZER PASIVO -> GPIO 15
+//
+// PULSADORES CON PULL-DOWN EXTERNO
+//
+// COMANDOS BLUETOOTH (desde App Inventor):
+//   '1' -> Melodía Videojuego
+//   '2' -> Melodía Star Wars
+//   '3' -> Alarma
+//   '4' -> Detener sonido
+//   'V' -> Subir volumen  (duty cycle)
+//   'v' -> Bajar volumen  (duty cycle)
+//   '?' -> Consultar estado
+// ==========================================================
+
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+
+// ==========================================================
+// PINES
+// ==========================================================
+
+#define BOTON_VIDEOJUEGO  16
+#define BOTON_STARWARS    17
+#define BOTON_ALARMA      18
+
+#define BUZZER            15
+
+
+// ==========================================================
+// VOLUMEN (duty cycle: 0 - 255)
+// 128 = 50% -> Buen valor inicial
+// ==========================================================
+
+int volumen = 128;
+#define VOLUMEN_PASO  20
+#define VOLUMEN_MIN    0
+#define VOLUMEN_MAX  255
+
+
+// ==========================================================
+// ESTADO GLOBAL
+// ==========================================================
+
+bool reproduciendo = false;   // Indica si hay melodía activa
+String ultimaMelodia = "";    // Nombre de la última melodía
+
+
+// ==========================================================
+// NOTAS MUSICALES
+// ==========================================================
+
+#define C4    261
+#define D4    294
+#define E4    329
+#define F4    349
+#define GS4   415
+#define A4    440
+#define AS4   466
+#define B4    494
+
+#define C5    523
+#define CS5   554
+#define D5    587
+#define DS5   622
+#define E5    659
+#define F5    698
+#define FS5   740
+#define G5    784
+#define GS5   831
+#define A5    880
+
+#define SILENCIO 0
+
+
+// ==========================================================
+// FUNCIÓN PARA TOCAR UNA NOTA
+// ==========================================================
+
+void beep(int frecuencia, int duracion)
+{
+  if (frecuencia > 0)
+  {
+    ledcWriteTone(BUZZER, frecuencia);
+  }
+  else
+  {
+    ledcWriteTone(BUZZER, 0);
+  }
+
+  delay(duracion);
+
+  // Apagar nota
+  ledcWriteTone(BUZZER, 0);
+
+  // Separación entre notas
+  delay(50);
+}
+
+
+// ==========================================================
+// DETENER SONIDO
+// ==========================================================
+
+void detenerSonido()
+{
+  ledcWriteTone(BUZZER, 0);
+  reproduciendo = false;
+  enviarEstado();
+}
+
+
+// ==========================================================
+// ENVIAR ESTADO POR BLUETOOTH
+// Formato JSON simple que App Inventor puede parsear
+//   {"estado":"tocando","melodia":"Star Wars","volumen":128}
+// ==========================================================
+
+void enviarEstado()
+{
+  String msg = "{\"estado\":\"";
+  msg += reproduciendo ? "tocando" : "libre";
+  msg += "\",\"melodia\":\"";
+  msg += ultimaMelodia;
+  msg += "\",\"volumen\":";
+  msg += volumen;
+  msg += "}";
+
+  SerialBT.println(msg);
+  Serial.println("BT-> " + msg);
+}
+
+
+// ==========================================================
+// MELODÍA 1 - VIDEOJUEGO RETRO
+// ==========================================================
+
+void melodiaVideojuego()
+{
+  reproduciendo = true;
+  ultimaMelodia = "Videojuego";
+  enviarEstado();
+
+  Serial.println("=================================");
+  Serial.println("       VIDEOJUEGO RETRO");
+  Serial.println("=================================");
+
+  beep(E5, 100);
+  beep(E5, 100);
+  beep(E5, 100);
+
+  beep(SILENCIO, 60);
+
+  beep(C5, 100);
+  beep(E5, 100);
+
+  beep(G5, 180);
+
+  beep(SILENCIO, 80);
+
+  beep(GS4, 120);
+
+  beep(C5, 120);
+  beep(GS4, 120);
+  beep(E4, 120);
+
+  beep(A4, 120);
+  beep(B4, 120);
+  beep(A4, 120);
+
+  beep(GS4, 120);
+  beep(E5, 160);
+
+  beep(G5, 120);
+  beep(A5, 180);
+
+  beep(F5, 120);
+  beep(G5, 120);
+  beep(E5, 120);
+
+  beep(C5, 120);
+  beep(D5, 120);
+  beep(B4, 220);
+
+  beep(E5, 120);
+  beep(G5, 120);
+  beep(A5, 350);
+
+  beep(SILENCIO, 250);
+
+  reproduciendo = false;
+  enviarEstado();
+}
+
+
+// ==========================================================
+// MELODÍA 2 - STAR WARS
+// ==========================================================
+
+void melodiaStarWars()
+{
+  reproduciendo = true;
+  ultimaMelodia = "Star Wars";
+  enviarEstado();
+
+  Serial.println("=================================");
+  Serial.println("          STAR WARS");
+  Serial.println("=================================");
+
+  // Primera sección
+  beep(A4, 500);
+  beep(A4, 500);
+  beep(A4, 500);
+
+  beep(F4, 350);
+  beep(C5, 150);
+
+  beep(A4, 500);
+
+  beep(F4, 350);
+  beep(C5, 150);
+
+  beep(A4, 650);
+
+  delay(500);
+
+  // Segunda frase
+  beep(E5, 500);
+  beep(E5, 500);
+  beep(E5, 500);
+
+  beep(F5, 350);
+  beep(C5, 150);
+
+  beep(GS4, 500);
+
+  beep(F4, 350);
+  beep(C5, 150);
+
+  beep(A4, 650);
+
+  delay(500);
+
+  // Segunda sección
+  beep(A5, 500);
+  beep(A4, 300);
+  beep(A4, 150);
+
+  beep(A5, 500);
+
+  beep(GS5, 325);
+  beep(G5, 175);
+
+  beep(FS5, 125);
+  beep(F5, 125);
+  beep(FS5, 250);
+
+  delay(325);
+
+  // Tercera frase
+  beep(AS4, 250);
+  beep(DS5, 500);
+  beep(D5, 325);
+
+  beep(CS5, 175);
+  beep(C5, 125);
+
+  beep(B4, 125);
+  beep(C5, 250);
+
+  delay(350);
+
+  // Variación 1
+  beep(F4, 250);
+  beep(GS4, 500);
+  beep(F4, 350);
+
+  beep(A4, 125);
+  beep(C5, 500);
+
+  beep(A4, 375);
+
+  beep(C5, 125);
+  beep(E5, 650);
+
+  delay(500);
+
+  // Repetición segunda sección
+  beep(A5, 500);
+  beep(A4, 300);
+  beep(A4, 150);
+
+  beep(A5, 500);
+
+  beep(GS5, 325);
+  beep(G5, 175);
+
+  beep(FS5, 125);
+  beep(F5, 125);
+  beep(FS5, 250);
+
+  delay(325);
+
+  beep(AS4, 250);
+  beep(DS5, 500);
+  beep(D5, 325);
+
+  beep(CS5, 175);
+  beep(C5, 125);
+
+  beep(B4, 125);
+  beep(C5, 250);
+
+  delay(350);
+
+  // Variación final
+  beep(F4, 250);
+  beep(GS4, 500);
+  beep(F4, 375);
+
+  beep(C5, 125);
+  beep(A4, 500);
+
+  beep(F4, 375);
+
+  beep(C5, 125);
+  beep(A4, 650);
+
+  delay(650);
+
+  ledcWriteTone(BUZZER, 0);
+
+  reproduciendo = false;
+  enviarEstado();
+}
+
+
+// ==========================================================
+// ALARMA
+// ==========================================================
+
+void alarma()
+{
+  reproduciendo = true;
+  ultimaMelodia = "Alarma";
+  enviarEstado();
+
+  Serial.println("=================================");
+  Serial.println("             ALARMA");
+  Serial.println("=================================");
+
+  for (int ciclo = 0; ciclo < 6; ciclo++)
+  {
+    // Subida
+    for (int frecuencia = 500; frecuencia <= 1500; frecuencia += 20)
+    {
+      ledcWriteTone(BUZZER, frecuencia);
+      delay(10);
+    }
+
+    // Bajada
+    for (int frecuencia = 1500; frecuencia >= 500; frecuencia -= 20)
+    {
+      ledcWriteTone(BUZZER, frecuencia);
+      delay(10);
+    }
+  }
+
+  ledcWriteTone(BUZZER, 0);
+  delay(200);
+
+  reproduciendo = false;
+  enviarEstado();
+}
+
+
+// ==========================================================
+// SETUP
+// ==========================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  // --------------------------------------------------------
+  // BLUETOOTH
+  // --------------------------------------------------------
+  // Nombre que aparecerá al buscar desde el celular
+  SerialBT.begin("ESP32-Buzzer");
+  Serial.println("Bluetooth iniciado: ESP32-Buzzer");
+
+  // --------------------------------------------------------
+  // PULSADORES
+  // --------------------------------------------------------
+  pinMode(BOTON_VIDEOJUEGO, INPUT);
+  pinMode(BOTON_STARWARS, INPUT);
+  pinMode(BOTON_ALARMA, INPUT);
+
+  // --------------------------------------------------------
+  // BUZZER PASIVO
+  // --------------------------------------------------------
+  ledcAttach(BUZZER, 1000, 8);
+  ledcWriteTone(BUZZER, 0);
+
+  // --------------------------------------------------------
+  // MENSAJE INICIAL
+  // --------------------------------------------------------
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("   ESP32 - SISTEMA DE SONIDO + BT");
+  Serial.println("========================================");
+  Serial.println("GPIO 16 -> Videojuego");
+  Serial.println("GPIO 17 -> Star Wars");
+  Serial.println("GPIO 18 -> Alarma");
+  Serial.println("GPIO 15 -> Buzzer");
+  Serial.println("----------------------------------------");
+  Serial.println("COMANDOS BLUETOOTH:");
+  Serial.println("  '1' -> Videojuego");
+  Serial.println("  '2' -> Star Wars");
+  Serial.println("  '3' -> Alarma");
+  Serial.println("  '4' -> Detener");
+  Serial.println("  'V' -> Subir volumen");
+  Serial.println("  'v' -> Bajar volumen");
+  Serial.println("  '?' -> Consultar estado");
+  Serial.println("========================================");
+  Serial.println("Sistema listo.");
+}
+
+
+// ==========================================================
+// LOOP
+// ==========================================================
+
+void loop()
+{
+
+  // ========================================================
+  // RECIBIR COMANDOS BLUETOOTH
+  // ========================================================
+
+  if (SerialBT.available())
+  {
+    char cmd = SerialBT.read();
+    Serial.print("Comando BT recibido: ");
+    Serial.println(cmd);
+
+    switch (cmd)
+    {
+      case '1':
+        melodiaVideojuego();
+        break;
+
+      case '2':
+        melodiaStarWars();
+        break;
+
+      case '3':
+        alarma();
+        break;
+
+      case '4':
+        detenerSonido();
+        break;
+
+      case 'V':
+        volumen = min(volumen + VOLUMEN_PASO, VOLUMEN_MAX);
+        Serial.print("Volumen: ");
+        Serial.println(volumen);
+        enviarEstado();
+        break;
+
+      case 'v':
+        volumen = max(volumen - VOLUMEN_PASO, VOLUMEN_MIN);
+        Serial.print("Volumen: ");
+        Serial.println(volumen);
+        enviarEstado();
+        break;
+
+      case '?':
+        enviarEstado();
+        break;
+    }
+  }
+
+
+  // ========================================================
+  // BOTÓN 1 - VIDEOJUEGO (físico)
+  // ========================================================
+
+  if (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
+  {
+    delay(30);
+    if (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
+    {
+      melodiaVideojuego();
+
+      while (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
+      {
+        delay(10);
+      }
+
+      delay(80);
+    }
+  }
+
+
+  // ========================================================
+  // BOTÓN 2 - STAR WARS (físico)
+  // ========================================================
+
+  if (digitalRead(BOTON_STARWARS) == HIGH)
+  {
+    delay(30);
+    if (digitalRead(BOTON_STARWARS) == HIGH)
+    {
+      melodiaStarWars();
+
+      while (digitalRead(BOTON_STARWARS) == HIGH)
+      {
+        delay(10);
+      }
+
+      delay(80);
+    }
+  }
+
+
+  // ========================================================
+  // BOTÓN 3 - ALARMA (físico)
+  // ========================================================
+
+  if (digitalRead(BOTON_ALARMA) == HIGH)
+  {
+    delay(30);
+    if (digitalRead(BOTON_ALARMA) == HIGH)
+    {
+      alarma();
+
+      while (digitalRead(BOTON_ALARMA) == HIGH)
+      {
+        delay(10);
+      }
+
+      delay(80);
+    }
+  }
+}
