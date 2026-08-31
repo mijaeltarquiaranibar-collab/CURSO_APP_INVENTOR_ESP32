@@ -1,0 +1,217 @@
+// ==========================================================
+// ESP32 — ADC + OLED + 3 LEDs + BLUETOOTH
+// ==========================================================
+// POTENCIÓMETRO  -> GPIO 34 (entrada ADC)
+// OLED 128x64    -> SDA=21, SCL=22 (I2C)
+// LED 1 (verde)  -> GPIO 12
+// LED 2 (ámbar)  -> GPIO 13
+// LED 3 (rojo)   -> GPIO 14
+//
+// COMANDOS BLUETOOTH (desde App Inventor):
+//   "V:xxx" -> fuerza el valor ADC (0-4095) desde el slider
+//   '?'     -> consulta el valor actual
+// ==========================================================
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+// ── OLED ──────────────────────────────────────────────────
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT  64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// ── PINES ─────────────────────────────────────────────────
+#define PIN_POT   34
+#define PIN_LED1  12
+#define PIN_LED2  13
+#define PIN_LED3  14
+
+// ── VARIABLES ─────────────────────────────────────────────
+int valorADC      = 0;   // lectura real del potenciómetro
+int valorForzado  = -1;  // -1 = no hay valor forzado por BT
+String bufferBT   = "";  // buffer para recibir comandos BT
+
+// ==========================================================
+// CONTROLAR LEDS SEGÚN VALOR ADC (0–4095)
+// ==========================================================
+void actualizarLEDs(int valor)
+{
+  if (valor < 1366)
+  {
+    // Rango bajo: solo LED 1
+    digitalWrite(PIN_LED1, HIGH);
+    digitalWrite(PIN_LED2, LOW);
+    digitalWrite(PIN_LED3, LOW);
+  }
+  else if (valor < 2731)
+  {
+    // Rango medio: LED 1 + LED 2
+    digitalWrite(PIN_LED1, HIGH);
+    digitalWrite(PIN_LED2, HIGH);
+    digitalWrite(PIN_LED3, LOW);
+  }
+  else
+  {
+    // Rango alto: todos encendidos
+    digitalWrite(PIN_LED1, HIGH);
+    digitalWrite(PIN_LED2, HIGH);
+    digitalWrite(PIN_LED3, HIGH);
+  }
+}
+
+// ==========================================================
+// ACTUALIZAR OLED
+// ==========================================================
+void actualizarOLED(int valor)
+{
+  int porcentaje = map(valor, 0, 4095, 0, 100);
+  int barraAncho = map(valor, 0, 4095, 0, 110);
+
+  display.clearDisplay();
+
+  // Título
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("ADC Potenciometro");
+
+  // Valor numérico grande
+  display.setTextSize(2);
+  display.setCursor(0, 16);
+  display.print(valor);
+
+  // Porcentaje pequeño al lado
+  display.setTextSize(1);
+  display.setCursor(60, 22);
+  display.print(porcentaje);
+  display.print(" %");
+
+  // Barra de progreso
+  display.drawRect(0, 42, 112, 10, SSD1306_WHITE);   // contorno
+  display.fillRect(1, 43, barraAncho, 8, SSD1306_WHITE); // relleno
+
+  // Estado LEDs
+  display.setTextSize(1);
+  display.setCursor(0, 56);
+  if (valor < 1366)       display.print("LEDs: [X][ ][ ]");
+  else if (valor < 2731)  display.print("LEDs: [X][X][ ]");
+  else                    display.print("LEDs: [X][X][X]");
+
+  display.display();
+}
+
+// ==========================================================
+// ENVIAR ESTADO POR BLUETOOTH
+// ==========================================================
+void enviarEstado(int valor)
+{
+  int porcentaje = map(valor, 0, 4095, 0, 100);
+
+  String msg = "{\"adc\":";
+  msg += valor;
+  msg += ",\"pct\":";
+  msg += porcentaje;
+  msg += ",\"leds\":";
+  if (valor < 1366)       msg += 1;
+  else if (valor < 2731)  msg += 2;
+  else                    msg += 3;
+  msg += "}";
+
+  SerialBT.println(msg);
+  Serial.println("BT-> " + msg);
+}
+
+// ==========================================================
+// SETUP
+// ==========================================================
+void setup()
+{
+  Serial.begin(115200);
+
+  // Bluetooth
+  SerialBT.begin("ESP32-ADC");
+  Serial.println("Bluetooth: ESP32-ADC");
+
+  // LEDs
+  pinMode(PIN_LED1, OUTPUT);
+  pinMode(PIN_LED2, OUTPUT);
+  pinMode(PIN_LED3, OUTPUT);
+
+  // OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  {
+    Serial.println("ERROR: OLED no encontrada");
+    while (true);
+  }
+  display.clearDisplay();
+  display.display();
+
+  Serial.println("Sistema listo.");
+}
+
+// ==========================================================
+// LOOP
+// ==========================================================
+void loop()
+{
+  // ── Leer potenciómetro ──────────────────────────────────
+  valorADC = analogRead(PIN_POT);
+
+  // ── Si hay valor forzado por Bluetooth, usarlo ──────────
+  int valorActual = (valorForzado >= 0) ? valorForzado : valorADC;
+
+  // ── Actualizar LEDs y OLED ──────────────────────────────
+  actualizarLEDs(valorActual);
+  actualizarOLED(valorActual);
+
+  // ── Recibir comandos Bluetooth ──────────────────────────
+  while (SerialBT.available())
+  {
+    char c = SerialBT.read();
+
+    if (c == '\n')
+    {
+      bufferBT.trim();
+
+      if (bufferBT.startsWith("V:"))
+      {
+        // Formato: "V:2048" -> fuerza valor ADC
+        int val = bufferBT.substring(2).toInt();
+        val = constrain(val, 0, 4095);
+        valorForzado = val;
+        Serial.print("Valor forzado BT: ");
+        Serial.println(val);
+      }
+      else if (bufferBT == "?")
+      {
+        enviarEstado(valorActual);
+      }
+      else if (bufferBT == "R")
+      {
+        // R = Release, vuelve al potenciómetro físico
+        valorForzado = -1;
+        Serial.println("Vuelve al potenciometro");
+      }
+
+      bufferBT = "";
+    }
+    else
+    {
+      bufferBT += c;
+    }
+  }
+
+  // ── Enviar estado cada 200 ms ───────────────────────────
+  static unsigned long ultimoEnvio = 0;
+  if (millis() - ultimoEnvio > 200)
+  {
+    enviarEstado(valorActual);
+    ultimoEnvio = millis();
+  }
+
+  delay(50);
+}
