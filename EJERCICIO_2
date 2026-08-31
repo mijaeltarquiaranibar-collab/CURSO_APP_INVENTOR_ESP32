@@ -1,22 +1,22 @@
 // ==========================================================
-// ESP32 + 3 PULSADORES + BUZZER PASIVO + BLUETOOTH
+// ESP32 + BLUETOOTH + 3 PULSADORES + BUZZER PASIVO
 // ==========================================================
-// BOTON 1 -> GPIO 16 -> Melodía videojuego
-// BOTON 2 -> GPIO 17 -> Melodía Star Wars
-// BOTON 3 -> GPIO 18 -> Alarma
+//
+// PULSADOR 1 -> GPIO 16 -> VIDEOJUEGO
+// PULSADOR 2 -> GPIO 17 -> STAR WARS
+// PULSADOR 3 -> GPIO 18 -> ALARMA
 //
 // BUZZER PASIVO -> GPIO 15
 //
-// PULSADORES CON PULL-DOWN EXTERNO
+// BLUETOOTH:
+// "1" -> Videojuego
+// "2" -> Star Wars
+// "3" -> Alarma
+// "4" -> Detener
+// "V" -> Volumen +
+// "v" -> Volumen -
 //
-// COMANDOS BLUETOOTH (desde App Inventor):
-//   '1' -> Melodía Videojuego
-//   '2' -> Melodía Star Wars
-//   '3' -> Alarma
-//   '4' -> Detener sonido
-//   'V' -> Subir volumen  (duty cycle)
-//   'v' -> Bajar volumen  (duty cycle)
-//   '?' -> Consultar estado
+// PULSADORES CON PULL-DOWN EXTERNO
 // ==========================================================
 
 #include "BluetoothSerial.h"
@@ -36,22 +36,17 @@ BluetoothSerial SerialBT;
 
 
 // ==========================================================
-// VOLUMEN (duty cycle: 0 - 255)
-// 128 = 50% -> Buen valor inicial
+// CONFIGURACIÓN DE VOLUMEN
 // ==========================================================
 
 int volumen = 128;
-#define VOLUMEN_PASO  20
-#define VOLUMEN_MIN    0
-#define VOLUMEN_MAX  255
 
+// Mínimo y máximo
+#define VOLUMEN_MIN  20
+#define VOLUMEN_MAX  128
 
-// ==========================================================
-// ESTADO GLOBAL
-// ==========================================================
-
-bool reproduciendo = false;   // Indica si hay melodía activa
-String ultimaMelodia = "";    // Nombre de la última melodía
+// Paso de volumen
+#define PASO_VOLUMEN  16
 
 
 // ==========================================================
@@ -82,303 +77,772 @@ String ultimaMelodia = "";    // Nombre de la última melodía
 
 
 // ==========================================================
-// FUNCIÓN PARA TOCAR UNA NOTA
+// ESTRUCTURA DE UNA NOTA
 // ==========================================================
 
-void beep(int frecuencia, int duracion)
+struct Nota
 {
-  if (frecuencia > 0)
-  {
-    ledcWriteTone(BUZZER, frecuencia);
-  }
-  else
-  {
-    ledcWriteTone(BUZZER, 0);
-  }
-
-  delay(duracion);
-
-  // Apagar nota
-  ledcWriteTone(BUZZER, 0);
-
-  // Separación entre notas
-  delay(50);
-}
+  int frecuencia;
+  unsigned long duracion;
+};
 
 
 // ==========================================================
-// DETENER SONIDO
+// MELODÍA VIDEOJUEGO
 // ==========================================================
 
-void detenerSonido()
+Nota melodiaVideojuego[] =
 {
-  ledcWriteTone(BUZZER, 0);
-  reproduciendo = false;
-  enviarEstado();
-}
+  {E5, 100},
+  {E5, 100},
+  {E5, 100},
+
+  {SILENCIO, 60},
+
+  {C5, 100},
+  {E5, 100},
+
+  {G5, 180},
+
+  {SILENCIO, 80},
+
+  {GS4, 120},
+
+  {C5, 120},
+  {GS4, 120},
+  {E4, 120},
+
+  {A4, 120},
+  {B4, 120},
+  {A4, 120},
+
+  {GS4, 120},
+  {E5, 160},
+
+  {G5, 120},
+  {A5, 180},
+
+  {F5, 120},
+  {G5, 120},
+  {E5, 120},
+
+  {C5, 120},
+  {D5, 120},
+  {B4, 220},
+
+  {E5, 120},
+  {G5, 120},
+  {A5, 350},
+
+  {SILENCIO, 250}
+};
+
+const int NUM_NOTAS_VIDEOJUEGO =
+  sizeof(melodiaVideojuego) / sizeof(melodiaVideojuego[0]);
 
 
 // ==========================================================
-// ENVIAR ESTADO POR BLUETOOTH
-// Formato JSON simple que App Inventor puede parsear
-//   {"estado":"tocando","melodia":"Star Wars","volumen":128}
+// MELODÍA STAR WARS
 // ==========================================================
 
-void enviarEstado()
+Nota melodiaStarWars[] =
 {
-  String msg = "{\"estado\":\"";
-  msg += reproduciendo ? "tocando" : "libre";
-  msg += "\",\"melodia\":\"";
-  msg += ultimaMelodia;
-  msg += "\",\"volumen\":";
-  msg += volumen;
-  msg += "}";
+  {A4, 500},
+  {A4, 500},
+  {A4, 500},
 
-  SerialBT.println(msg);
-  Serial.println("BT-> " + msg);
-}
+  {F4, 350},
+  {C5, 150},
+
+  {A4, 500},
+
+  {F4, 350},
+  {C5, 150},
+
+  {A4, 650},
+
+  {SILENCIO, 500},
+
+  {E5, 500},
+  {E5, 500},
+  {E5, 500},
+
+  {F5, 350},
+  {C5, 150},
+
+  {GS4, 500},
+
+  {F4, 350},
+  {C5, 150},
+
+  {A4, 650},
+
+  {SILENCIO, 500},
+
+  {A5, 500},
+  {A4, 300},
+  {A4, 150},
+
+  {A5, 500},
+
+  {GS5, 325},
+  {G5, 175},
+
+  {FS5, 125},
+  {F5, 125},
+  {FS5, 250},
+
+  {SILENCIO, 325},
+
+  {AS4, 250},
+  {DS5, 500},
+  {D5, 325},
+
+  {CS5, 175},
+  {C5, 125},
+
+  {B4, 125},
+  {C5, 250},
+
+  {SILENCIO, 350},
+
+  {F4, 250},
+  {GS4, 500},
+  {F4, 350},
+
+  {A4, 125},
+  {C5, 500},
+
+  {A4, 375},
+
+  {C5, 125},
+  {E5, 650},
+
+  {SILENCIO, 500},
+
+  {A5, 500},
+  {A4, 300},
+  {A4, 150},
+
+  {A5, 500},
+
+  {GS5, 325},
+  {G5, 175},
+
+  {FS5, 125},
+  {F5, 125},
+  {FS5, 250},
+
+  {SILENCIO, 325},
+
+  {AS4, 250},
+  {DS5, 500},
+  {D5, 325},
+
+  {CS5, 175},
+  {C5, 125},
+
+  {B4, 125},
+  {C5, 250},
+
+  {SILENCIO, 350},
+
+  {F4, 250},
+  {GS4, 500},
+  {F4, 375},
+
+  {C5, 125},
+  {A4, 500},
+
+  {F4, 375},
+
+  {C5, 125},
+  {A4, 650},
+
+  {SILENCIO, 650}
+};
+
+const int NUM_NOTAS_STARWARS =
+  sizeof(melodiaStarWars) / sizeof(melodiaStarWars[0]);
 
 
 // ==========================================================
-// MELODÍA 1 - VIDEOJUEGO RETRO
+// VARIABLES DE REPRODUCCIÓN
 // ==========================================================
 
-void melodiaVideojuego()
-{
-  reproduciendo = true;
-  ultimaMelodia = "Videojuego";
-  enviarEstado();
+Nota* melodiaActual = NULL;
 
-  Serial.println("=================================");
-  Serial.println("       VIDEOJUEGO RETRO");
-  Serial.println("=================================");
+int cantidadNotas = 0;
+int notaActual = 0;
 
-  beep(E5, 100);
-  beep(E5, 100);
-  beep(E5, 100);
+bool reproduciendo = false;
 
-  beep(SILENCIO, 60);
-
-  beep(C5, 100);
-  beep(E5, 100);
-
-  beep(G5, 180);
-
-  beep(SILENCIO, 80);
-
-  beep(GS4, 120);
-
-  beep(C5, 120);
-  beep(GS4, 120);
-  beep(E4, 120);
-
-  beep(A4, 120);
-  beep(B4, 120);
-  beep(A4, 120);
-
-  beep(GS4, 120);
-  beep(E5, 160);
-
-  beep(G5, 120);
-  beep(A5, 180);
-
-  beep(F5, 120);
-  beep(G5, 120);
-  beep(E5, 120);
-
-  beep(C5, 120);
-  beep(D5, 120);
-  beep(B4, 220);
-
-  beep(E5, 120);
-  beep(G5, 120);
-  beep(A5, 350);
-
-  beep(SILENCIO, 250);
-
-  reproduciendo = false;
-  enviarEstado();
-}
-
-
-// ==========================================================
-// MELODÍA 2 - STAR WARS
-// ==========================================================
-
-void melodiaStarWars()
-{
-  reproduciendo = true;
-  ultimaMelodia = "Star Wars";
-  enviarEstado();
-
-  Serial.println("=================================");
-  Serial.println("          STAR WARS");
-  Serial.println("=================================");
-
-  // Primera sección
-  beep(A4, 500);
-  beep(A4, 500);
-  beep(A4, 500);
-
-  beep(F4, 350);
-  beep(C5, 150);
-
-  beep(A4, 500);
-
-  beep(F4, 350);
-  beep(C5, 150);
-
-  beep(A4, 650);
-
-  delay(500);
-
-  // Segunda frase
-  beep(E5, 500);
-  beep(E5, 500);
-  beep(E5, 500);
-
-  beep(F5, 350);
-  beep(C5, 150);
-
-  beep(GS4, 500);
-
-  beep(F4, 350);
-  beep(C5, 150);
-
-  beep(A4, 650);
-
-  delay(500);
-
-  // Segunda sección
-  beep(A5, 500);
-  beep(A4, 300);
-  beep(A4, 150);
-
-  beep(A5, 500);
-
-  beep(GS5, 325);
-  beep(G5, 175);
-
-  beep(FS5, 125);
-  beep(F5, 125);
-  beep(FS5, 250);
-
-  delay(325);
-
-  // Tercera frase
-  beep(AS4, 250);
-  beep(DS5, 500);
-  beep(D5, 325);
-
-  beep(CS5, 175);
-  beep(C5, 125);
-
-  beep(B4, 125);
-  beep(C5, 250);
-
-  delay(350);
-
-  // Variación 1
-  beep(F4, 250);
-  beep(GS4, 500);
-  beep(F4, 350);
-
-  beep(A4, 125);
-  beep(C5, 500);
-
-  beep(A4, 375);
-
-  beep(C5, 125);
-  beep(E5, 650);
-
-  delay(500);
-
-  // Repetición segunda sección
-  beep(A5, 500);
-  beep(A4, 300);
-  beep(A4, 150);
-
-  beep(A5, 500);
-
-  beep(GS5, 325);
-  beep(G5, 175);
-
-  beep(FS5, 125);
-  beep(F5, 125);
-  beep(FS5, 250);
-
-  delay(325);
-
-  beep(AS4, 250);
-  beep(DS5, 500);
-  beep(D5, 325);
-
-  beep(CS5, 175);
-  beep(C5, 125);
-
-  beep(B4, 125);
-  beep(C5, 250);
-
-  delay(350);
-
-  // Variación final
-  beep(F4, 250);
-  beep(GS4, 500);
-  beep(F4, 375);
-
-  beep(C5, 125);
-  beep(A4, 500);
-
-  beep(F4, 375);
-
-  beep(C5, 125);
-  beep(A4, 650);
-
-  delay(650);
-
-  ledcWriteTone(BUZZER, 0);
-
-  reproduciendo = false;
-  enviarEstado();
-}
+unsigned long tiempoInicioNota = 0;
 
 
 // ==========================================================
 // ALARMA
 // ==========================================================
 
-void alarma()
+bool alarmaActiva = false;
+
+int frecuenciaAlarma = 500;
+
+int direccionAlarma = 1;
+
+unsigned long tiempoAlarma = 0;
+
+int ciclosAlarma = 0;
+
+#define PASO_ALARMA 20
+#define VELOCIDAD_ALARMA 10
+#define MAX_CICLOS_ALARMA 6
+
+
+// ==========================================================
+// NOMBRE DE LA MELODÍA
+// ==========================================================
+
+String nombreMelodia = "";
+
+
+// ==========================================================
+// FUNCIÓN PARA APLICAR VOLUMEN
+// ==========================================================
+
+void aplicarVolumen()
 {
-  reproduciendo = true;
-  ultimaMelodia = "Alarma";
-  enviarEstado();
+  ledcWrite(BUZZER, volumen);
+}
 
-  Serial.println("=================================");
-  Serial.println("             ALARMA");
-  Serial.println("=================================");
 
-  for (int ciclo = 0; ciclo < 6; ciclo++)
+// ==========================================================
+// TOCAR UNA FRECUENCIA
+// ==========================================================
+
+void tocarFrecuencia(int frecuencia)
+{
+  if (frecuencia > 0)
   {
-    // Subida
-    for (int frecuencia = 500; frecuencia <= 1500; frecuencia += 20)
-    {
-      ledcWriteTone(BUZZER, frecuencia);
-      delay(10);
-    }
+    ledcWriteTone(BUZZER, frecuencia);
 
-    // Bajada
-    for (int frecuencia = 1500; frecuencia >= 500; frecuencia -= 20)
-    {
-      ledcWriteTone(BUZZER, frecuencia);
-      delay(10);
-    }
+    // Aplicar volumen
+    ledcWrite(BUZZER, volumen);
+  }
+  else
+  {
+    ledcWriteTone(BUZZER, 0);
+    ledcWrite(BUZZER, 0);
+  }
+}
+
+
+// ==========================================================
+// DETENER BUZZER
+// ==========================================================
+
+void apagarBuzzer()
+{
+  ledcWriteTone(BUZZER, 0);
+  ledcWrite(BUZZER, 0);
+}
+
+
+// ==========================================================
+// ENVIAR ESTADO A APP INVENTOR
+// ==========================================================
+
+void enviarEstado(String estado)
+{
+  String mensaje;
+
+  mensaje = "ESTADO:" + estado;
+
+  if (nombreMelodia != "")
+  {
+    mensaje += " | MELODIA:" + nombreMelodia;
   }
 
-  ledcWriteTone(BUZZER, 0);
-  delay(200);
+  mensaje += " | VOLUMEN:" + String(volumen);
+
+  Serial.println(mensaje);
+
+  if (SerialBT.hasClient())
+  {
+    SerialBT.println(mensaje);
+  }
+}
+
+
+// ==========================================================
+// DETENER TODO
+// ==========================================================
+
+void detenerTodo()
+{
+  reproduciendo = false;
+  alarmaActiva = false;
+
+  melodiaActual = NULL;
+
+  notaActual = 0;
+  cantidadNotas = 0;
+
+  apagarBuzzer();
+
+  nombreMelodia = "";
+
+  enviarEstado("DETENIDO");
+}
+
+
+// ==========================================================
+// INICIAR MELODÍA
+// ==========================================================
+
+void iniciarMelodia(Nota* melodia, int cantidad, String nombre)
+{
+  // Detener reproducción anterior
+  apagarBuzzer();
+
+  alarmaActiva = false;
+
+  melodiaActual = melodia;
+
+  cantidadNotas = cantidad;
+
+  notaActual = 0;
+
+  reproduciendo = true;
+
+  nombreMelodia = nombre;
+
+  tiempoInicioNota = millis();
+
+  tocarFrecuencia(melodiaActual[0].frecuencia);
+
+  enviarEstado("TOCANDO");
+
+  Serial.println("Iniciando: " + nombre);
+}
+
+
+// ==========================================================
+// ACTUALIZAR MELODÍA
+// ==========================================================
+
+void actualizarMelodia()
+{
+  if (!reproduciendo)
+  {
+    return;
+  }
+
+
+  unsigned long ahora = millis();
+
+
+  // Verificar duración de la nota actual
+  if (ahora - tiempoInicioNota >=
+      melodiaActual[notaActual].duracion)
+  {
+
+    // Apagar nota anterior
+    apagarBuzzer();
+
+    notaActual++;
+
+    // ¿Terminó la melodía?
+    if (notaActual >= cantidadNotas)
+    {
+      reproduciendo = false;
+
+      nombreMelodia = "";
+
+      apagarBuzzer();
+
+      enviarEstado("LIBRE");
+
+      Serial.println("Melodia terminada");
+
+      return;
+    }
+
+
+    // Siguiente nota
+    tiempoInicioNota = ahora;
+
+    tocarFrecuencia(
+      melodiaActual[notaActual].frecuencia
+    );
+  }
+}
+
+
+// ==========================================================
+// INICIAR ALARMA
+// ==========================================================
+
+void iniciarAlarma()
+{
+  apagarBuzzer();
 
   reproduciendo = false;
-  enviarEstado();
+
+  alarmaActiva = true;
+
+  frecuenciaAlarma = 500;
+
+  direccionAlarma = 1;
+
+  ciclosAlarma = 0;
+
+  tiempoAlarma = millis();
+
+  nombreMelodia = "Alarma";
+
+  tocarFrecuencia(frecuenciaAlarma);
+
+  enviarEstado("ALARMA");
+
+  Serial.println("Alarma iniciada");
+}
+
+
+// ==========================================================
+// ACTUALIZAR ALARMA
+// ==========================================================
+
+void actualizarAlarma()
+{
+  if (!alarmaActiva)
+  {
+    return;
+  }
+
+
+  unsigned long ahora = millis();
+
+
+  if (ahora - tiempoAlarma >= VELOCIDAD_ALARMA)
+  {
+    tiempoAlarma = ahora;
+
+
+    // Subir o bajar frecuencia
+    frecuenciaAlarma +=
+      direccionAlarma * PASO_ALARMA;
+
+
+    // Llegó al máximo
+    if (frecuenciaAlarma >= 1500)
+    {
+      frecuenciaAlarma = 1500;
+
+      direccionAlarma = -1;
+    }
+
+
+    // Llegó al mínimo
+    if (frecuenciaAlarma <= 500)
+    {
+      frecuenciaAlarma = 500;
+
+      direccionAlarma = 1;
+
+      ciclosAlarma++;
+
+      // Verificar cantidad de ciclos
+      if (ciclosAlarma >= MAX_CICLOS_ALARMA)
+      {
+        alarmaActiva = false;
+
+        apagarBuzzer();
+
+        nombreMelodia = "";
+
+        enviarEstado("LIBRE");
+
+        Serial.println("Alarma terminada");
+
+        return;
+      }
+    }
+
+
+    tocarFrecuencia(frecuenciaAlarma);
+  }
+}
+
+
+// ==========================================================
+// AUMENTAR VOLUMEN
+// ==========================================================
+
+void aumentarVolumen()
+{
+  volumen = volumen + 16;
+
+  if (volumen >= 255)
+  {
+    volumen = 255;
+  }
+
+  Serial.print("VOL + -> ");
+  Serial.println(volumen);
+
+  aplicarVolumen();
+
+  enviarEstado("VOLUMEN");
+}
+
+
+// ==========================================================
+// DISMINUIR VOLUMEN
+// ==========================================================
+
+void disminuirVolumen()
+{
+  volumen = volumen - 16;
+
+  if (volumen <= 0)
+  {
+    volumen = 0;
+  }
+
+  Serial.print("VOL - -> ");
+  Serial.println(volumen);
+
+  aplicarVolumen();
+
+  enviarEstado("VOLUMEN");
+}
+
+
+// ==========================================================
+// PROCESAR COMANDO BLUETOOTH
+// ==========================================================
+
+void procesarComando(String comando)
+{
+  comando.trim();
+
+  Serial.println("Bluetooth -> " + comando);
+
+
+  // --------------------------------------------------------
+  // VIDEOJUEGO
+  // --------------------------------------------------------
+
+  if (comando == "1")
+  {
+    iniciarMelodia(
+      melodiaVideojuego,
+      NUM_NOTAS_VIDEOJUEGO,
+      "Videojuego"
+    );
+  }
+
+
+  // --------------------------------------------------------
+  // STAR WARS
+  // --------------------------------------------------------
+
+  else if (comando == "2")
+  {
+    iniciarMelodia(
+      melodiaStarWars,
+      NUM_NOTAS_STARWARS,
+      "Star Wars"
+    );
+  }
+
+
+  // --------------------------------------------------------
+  // ALARMA
+  // --------------------------------------------------------
+
+  else if (comando == "3")
+  {
+    iniciarAlarma();
+  }
+
+
+  // --------------------------------------------------------
+  // DETENER
+  // --------------------------------------------------------
+
+  else if (comando == "4")
+  {
+    detenerTodo();
+  }
+
+
+  // --------------------------------------------------------
+  // VOLUMEN +
+  // --------------------------------------------------------
+
+  else if (comando == "V")
+  {
+    aumentarVolumen();
+  }
+
+
+  // --------------------------------------------------------
+  // VOLUMEN -
+  // --------------------------------------------------------
+
+  else if (comando == "v")
+  {
+    disminuirVolumen();
+  }
+}
+
+
+// ==========================================================
+// LEER BLUETOOTH
+// ==========================================================
+
+void revisarBluetooth()
+{
+  while (SerialBT.available())
+  {
+    char comando = SerialBT.read();
+
+    Serial.print("Comando Bluetooth recibido: ");
+    Serial.println(comando);
+
+    // --------------------------------------
+    // VIDEOJUEGO
+    // --------------------------------------
+
+    if (comando == '1')
+    {
+      iniciarMelodia(
+        melodiaVideojuego,
+        NUM_NOTAS_VIDEOJUEGO,
+        "Videojuego"
+      );
+    }
+
+
+    // --------------------------------------
+    // STAR WARS
+    // --------------------------------------
+
+    else if (comando == '2')
+    {
+      iniciarMelodia(
+        melodiaStarWars,
+        NUM_NOTAS_STARWARS,
+        "Star Wars"
+      );
+    }
+
+
+    // --------------------------------------
+    // ALARMA
+    // --------------------------------------
+
+    else if (comando == '3')
+    {
+      iniciarAlarma();
+    }
+
+
+    // --------------------------------------
+    // DETENER
+    // --------------------------------------
+
+    else if (comando == '4')
+    {
+      detenerTodo();
+    }
+
+
+    // --------------------------------------
+    // VOLUMEN +
+    // --------------------------------------
+
+    else if (comando == 'V')
+    {
+      aumentarVolumen();
+    }
+
+
+    // --------------------------------------
+    // VOLUMEN -
+    // --------------------------------------
+
+    else if (comando == 'v')
+    {
+      disminuirVolumen();
+    }
+  }
+}
+
+// ==========================================================
+// BOTONES FÍSICOS
+// ==========================================================
+
+bool estadoAnteriorBoton1 = LOW;
+bool estadoAnteriorBoton2 = LOW;
+bool estadoAnteriorBoton3 = LOW;
+
+
+// ==========================================================
+// REVISAR BOTONES FÍSICOS
+// ==========================================================
+
+void revisarBotones()
+{
+  bool boton1 = digitalRead(BOTON_VIDEOJUEGO);
+  bool boton2 = digitalRead(BOTON_STARWARS);
+  bool boton3 = digitalRead(BOTON_ALARMA);
+
+
+  // --------------------------------------------------------
+  // BOTÓN 1
+  // --------------------------------------------------------
+
+  if (boton1 == HIGH && estadoAnteriorBoton1 == LOW)
+  {
+    iniciarMelodia(
+      melodiaVideojuego,
+      NUM_NOTAS_VIDEOJUEGO,
+      "Videojuego"
+    );
+  }
+
+
+  // --------------------------------------------------------
+  // BOTÓN 2
+  // --------------------------------------------------------
+
+  if (boton2 == HIGH && estadoAnteriorBoton2 == LOW)
+  {
+    iniciarMelodia(
+      melodiaStarWars,
+      NUM_NOTAS_STARWARS,
+      "Star Wars"
+    );
+  }
+
+
+  // --------------------------------------------------------
+  // BOTÓN 3
+  // --------------------------------------------------------
+
+  if (boton3 == HIGH && estadoAnteriorBoton3 == LOW)
+  {
+    iniciarAlarma();
+  }
+
+
+  // Guardar estados
+  estadoAnteriorBoton1 = boton1;
+  estadoAnteriorBoton2 = boton2;
+  estadoAnteriorBoton3 = boton3;
 }
 
 
@@ -390,48 +854,57 @@ void setup()
 {
   Serial.begin(115200);
 
-  // --------------------------------------------------------
-  // BLUETOOTH
-  // --------------------------------------------------------
-  // Nombre que aparecerá al buscar desde el celular
-  SerialBT.begin("ESP32-Buzzer");
-  Serial.println("Bluetooth iniciado: ESP32-Buzzer");
 
   // --------------------------------------------------------
   // PULSADORES
   // --------------------------------------------------------
+
   pinMode(BOTON_VIDEOJUEGO, INPUT);
   pinMode(BOTON_STARWARS, INPUT);
   pinMode(BOTON_ALARMA, INPUT);
 
-  // --------------------------------------------------------
-  // BUZZER PASIVO
-  // --------------------------------------------------------
-  ledcAttach(BUZZER, 1000, 8);
-  ledcWriteTone(BUZZER, 0);
 
   // --------------------------------------------------------
-  // MENSAJE INICIAL
+  // BUZZER
   // --------------------------------------------------------
+
+  ledcAttach(BUZZER, 1000, 8);
+
+  apagarBuzzer();
+
+
+  // --------------------------------------------------------
+  // BLUETOOTH
+  // --------------------------------------------------------
+
+  SerialBT.begin("ESP32_SONIDO");
+
+
+  // --------------------------------------------------------
+  // MENSAJES
+  // --------------------------------------------------------
+
   Serial.println();
   Serial.println("========================================");
-  Serial.println("   ESP32 - SISTEMA DE SONIDO + BT");
+  Serial.println("       ESP32 - SISTEMA DE SONIDO");
   Serial.println("========================================");
+  Serial.println("Bluetooth: ESP32_SONIDO");
+  Serial.println();
   Serial.println("GPIO 16 -> Videojuego");
   Serial.println("GPIO 17 -> Star Wars");
   Serial.println("GPIO 18 -> Alarma");
   Serial.println("GPIO 15 -> Buzzer");
-  Serial.println("----------------------------------------");
-  Serial.println("COMANDOS BLUETOOTH:");
-  Serial.println("  '1' -> Videojuego");
-  Serial.println("  '2' -> Star Wars");
-  Serial.println("  '3' -> Alarma");
-  Serial.println("  '4' -> Detener");
-  Serial.println("  'V' -> Subir volumen");
-  Serial.println("  'v' -> Bajar volumen");
-  Serial.println("  '?' -> Consultar estado");
+  Serial.println();
+  Serial.println("Comandos Bluetooth:");
+  Serial.println("1 -> Videojuego");
+  Serial.println("2 -> Star Wars");
+  Serial.println("3 -> Alarma");
+  Serial.println("4 -> Detener");
+  Serial.println("V -> Volumen +");
+  Serial.println("v -> Volumen -");
   Serial.println("========================================");
-  Serial.println("Sistema listo.");
+
+  enviarEstado("LISTO");
 }
 
 
@@ -441,115 +914,30 @@ void setup()
 
 void loop()
 {
-
   // ========================================================
-  // RECIBIR COMANDOS BLUETOOTH
+  // REVISAR BLUETOOTH
   // ========================================================
 
-  if (SerialBT.available())
-  {
-    char cmd = SerialBT.read();
-    Serial.print("Comando BT recibido: ");
-    Serial.println(cmd);
-
-    switch (cmd)
-    {
-      case '1':
-        melodiaVideojuego();
-        break;
-
-      case '2':
-        melodiaStarWars();
-        break;
-
-      case '3':
-        alarma();
-        break;
-
-      case '4':
-        detenerSonido();
-        break;
-
-      case 'V':
-        volumen = min(volumen + VOLUMEN_PASO, VOLUMEN_MAX);
-        Serial.print("Volumen: ");
-        Serial.println(volumen);
-        enviarEstado();
-        break;
-
-      case 'v':
-        volumen = max(volumen - VOLUMEN_PASO, VOLUMEN_MIN);
-        Serial.print("Volumen: ");
-        Serial.println(volumen);
-        enviarEstado();
-        break;
-
-      case '?':
-        enviarEstado();
-        break;
-    }
-  }
+  revisarBluetooth();
 
 
   // ========================================================
-  // BOTÓN 1 - VIDEOJUEGO (físico)
+  // REVISAR BOTONES FÍSICOS
   // ========================================================
 
-  if (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
-  {
-    delay(30);
-    if (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
-    {
-      melodiaVideojuego();
-
-      while (digitalRead(BOTON_VIDEOJUEGO) == HIGH)
-      {
-        delay(10);
-      }
-
-      delay(80);
-    }
-  }
+  revisarBotones();
 
 
   // ========================================================
-  // BOTÓN 2 - STAR WARS (físico)
+  // ACTUALIZAR MELODÍA
   // ========================================================
 
-  if (digitalRead(BOTON_STARWARS) == HIGH)
-  {
-    delay(30);
-    if (digitalRead(BOTON_STARWARS) == HIGH)
-    {
-      melodiaStarWars();
-
-      while (digitalRead(BOTON_STARWARS) == HIGH)
-      {
-        delay(10);
-      }
-
-      delay(80);
-    }
-  }
+  actualizarMelodia();
 
 
   // ========================================================
-  // BOTÓN 3 - ALARMA (físico)
+  // ACTUALIZAR ALARMA
   // ========================================================
 
-  if (digitalRead(BOTON_ALARMA) == HIGH)
-  {
-    delay(30);
-    if (digitalRead(BOTON_ALARMA) == HIGH)
-    {
-      alarma();
-
-      while (digitalRead(BOTON_ALARMA) == HIGH)
-      {
-        delay(10);
-      }
-
-      delay(80);
-    }
-  }
+  actualizarAlarma();
 }
