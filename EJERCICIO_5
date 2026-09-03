@@ -1,0 +1,511 @@
+// ==========================================================
+// ESP32 - SISTEMA DE ALARMA Y PUERTA
+// BLUETOOTH CLÁSICO + PIR + SERVO + LED + BUZZER
+// ==========================================================
+//
+// SERVO        -> GPIO 23
+// PIR          -> GPIO 25
+// LED ROJO     -> GPIO 12
+// BUZZER       -> GPIO 15
+//
+// BLUETOOTH:
+// "A"    -> Activar alarma manualmente
+// "D"    -> Desactivar / desbloquear
+// "1234" -> Código correcto
+//
+// FUNCIONAMIENTO:
+//
+// 1. El PIR detecta movimiento.
+// 2. El servo cierra/bloquea la puerta.
+// 3. El LED rojo se enciende.
+// 4. El buzzer activa la alarma.
+// 5. El sistema queda bloqueado.
+// 6. Solo el código correcto desbloquea.
+//
+// ==========================================================
+
+
+#include "BluetoothSerial.h"
+#include <ESP32Servo.h>
+
+
+// ==========================================================
+// BLUETOOTH
+// ==========================================================
+
+BluetoothSerial SerialBT;
+
+
+// ==========================================================
+// PINES
+// ==========================================================
+
+#define SERVO_PIN 23
+#define PIR_PIN   25
+#define LED_PIN   12
+#define BUZZER_PIN 15
+
+
+// ==========================================================
+// SERVO
+// ==========================================================
+
+Servo servoPuerta;
+
+// Ajustar estos valores según tu mecanismo
+#define ANGULO_ABIERTO 0
+#define ANGULO_CERRADO 90
+
+
+// ==========================================================
+// CÓDIGO DE SEGURIDAD
+// ==========================================================
+
+String CODIGO_CORRECTO = "1234";
+
+
+// ==========================================================
+// ESTADO DEL SISTEMA
+// ==========================================================
+
+bool alarmaActiva = false;
+bool puertaCerrada = false;
+
+
+// ==========================================================
+// ALARMA SONORA
+// ==========================================================
+
+unsigned long tiempoBuzzer = 0;
+
+bool estadoBuzzer = false;
+
+#define INTERVALO_BUZZER 250
+
+int frecuenciaBuzzer = 1200;
+
+
+// ==========================================================
+// ENVÍO DE ESTADO
+// ==========================================================
+
+void enviarEstado()
+{
+  String mensaje;
+
+  mensaje = "ALARMA:";
+
+  if (alarmaActiva)
+  {
+    mensaje += "ACTIVA";
+  }
+  else
+  {
+    mensaje += "INACTIVA";
+  }
+
+  mensaje += "|PUERTA:";
+
+  if (puertaCerrada)
+  {
+    mensaje += "CERRADA";
+  }
+  else
+  {
+    mensaje += "ABIERTA";
+  }
+
+  mensaje += "|LED:";
+
+  if (alarmaActiva)
+  {
+    mensaje += "ON";
+  }
+  else
+  {
+    mensaje += "OFF";
+  }
+
+  mensaje += "|BUZZER:";
+
+  if (alarmaActiva)
+  {
+    mensaje += "ON";
+  }
+  else
+  {
+    mensaje += "OFF";
+  }
+
+
+  Serial.println(mensaje);
+
+
+  if (SerialBT.hasClient())
+  {
+    SerialBT.println(mensaje);
+  }
+}
+
+
+// ==========================================================
+// ENCENDER BUZZER
+// ==========================================================
+
+void encenderBuzzer()
+{
+  ledcWriteTone(BUZZER_PIN, frecuenciaBuzzer);
+}
+
+
+// ==========================================================
+// APAGAR BUZZER
+// ==========================================================
+
+void apagarBuzzer()
+{
+  ledcWriteTone(BUZZER_PIN, 0);
+}
+
+
+// ==========================================================
+// ACTUALIZAR ALARMA SONORA
+// ==========================================================
+
+void actualizarBuzzer()
+{
+  if (!alarmaActiva)
+  {
+    apagarBuzzer();
+    estadoBuzzer = false;
+    return;
+  }
+
+
+  unsigned long ahora = millis();
+
+
+  if (ahora - tiempoBuzzer >= INTERVALO_BUZZER)
+  {
+    tiempoBuzzer = ahora;
+
+
+    if (estadoBuzzer)
+    {
+      apagarBuzzer();
+
+      estadoBuzzer = false;
+    }
+    else
+    {
+      encenderBuzzer();
+
+      estadoBuzzer = true;
+    }
+  }
+}
+
+
+// ==========================================================
+// CERRAR / BLOQUEAR PUERTA
+// ==========================================================
+
+void activarAlarma()
+{
+  // Evitar volver a ejecutar si ya está activa
+  if (alarmaActiva)
+  {
+    return;
+  }
+
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("      ALERTA DE MOVIMIENTO");
+  Serial.println("================================");
+
+
+  alarmaActiva = true;
+  puertaCerrada = true;
+
+
+  // --------------------------------------------------------
+  // CERRAR SERVO
+  // --------------------------------------------------------
+
+  servoPuerta.write(ANGULO_CERRADO);
+
+
+  // --------------------------------------------------------
+  // ENCENDER LED
+  // --------------------------------------------------------
+
+  digitalWrite(LED_PIN, HIGH);
+
+
+  // --------------------------------------------------------
+  // INICIAR BUZZER
+  // --------------------------------------------------------
+
+  tiempoBuzzer = millis();
+
+  estadoBuzzer = false;
+
+
+  // --------------------------------------------------------
+  // ENVIAR ESTADO
+  // --------------------------------------------------------
+
+  enviarEstado();
+}
+
+
+// ==========================================================
+// DESBLOQUEAR PUERTA
+// ==========================================================
+
+void desactivarAlarma()
+{
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("       ALARMA DESACTIVADA");
+  Serial.println("================================");
+
+
+  alarmaActiva = false;
+
+  puertaCerrada = false;
+
+
+  // --------------------------------------------------------
+  // ABRIR SERVO
+  // --------------------------------------------------------
+
+  servoPuerta.write(ANGULO_ABIERTO);
+
+
+  // --------------------------------------------------------
+  // APAGAR LED
+  // --------------------------------------------------------
+
+  digitalWrite(LED_PIN, LOW);
+
+
+  // --------------------------------------------------------
+  // APAGAR BUZZER
+  // --------------------------------------------------------
+
+  apagarBuzzer();
+
+  estadoBuzzer = false;
+
+
+  // --------------------------------------------------------
+  // ENVIAR ESTADO
+  // --------------------------------------------------------
+
+  enviarEstado();
+}
+
+
+// ==========================================================
+// VERIFICAR CÓDIGO
+// ==========================================================
+
+void verificarCodigo(String codigo)
+{
+  codigo.trim();
+
+
+  Serial.print("Codigo recibido: ");
+  Serial.println(codigo);
+
+
+  // --------------------------------------------------------
+  // VERIFICAR
+  // --------------------------------------------------------
+
+  if (codigo == CODIGO_CORRECTO)
+  {
+    Serial.println("CODIGO CORRECTO");
+
+    desactivarAlarma();
+
+    if (SerialBT.hasClient())
+    {
+      SerialBT.println("CODIGO:CORRECTO");
+    }
+  }
+  else
+  {
+    Serial.println("CODIGO INCORRECTO");
+
+    if (SerialBT.hasClient())
+    {
+      SerialBT.println("CODIGO:INCORRECTO");
+    }
+  }
+}
+
+
+// ==========================================================
+// PROCESAR BLUETOOTH
+// ==========================================================
+
+void revisarBluetooth()
+{
+  if (!SerialBT.available())
+  {
+    return;
+  }
+
+
+  String comando = SerialBT.readStringUntil('\n');
+
+  comando.trim();
+
+
+  Serial.print("Bluetooth -> ");
+  Serial.println(comando);
+
+
+  // --------------------------------------------------------
+  // CÓDIGO
+  // --------------------------------------------------------
+
+  if (comando.length() > 0)
+  {
+    verificarCodigo(comando);
+  }
+}
+
+
+// ==========================================================
+// REVISAR SENSOR PIR
+// ==========================================================
+
+void revisarPIR()
+{
+  int estadoPIR = digitalRead(PIR_PIN);
+
+
+  // Si detecta movimiento y la alarma está apagada
+  if (estadoPIR == HIGH && !alarmaActiva)
+  {
+    activarAlarma();
+  }
+}
+
+
+// ==========================================================
+// SETUP
+// ==========================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+
+  // --------------------------------------------------------
+  // PINES
+  // --------------------------------------------------------
+
+  pinMode(PIR_PIN, INPUT);
+
+  pinMode(LED_PIN, OUTPUT);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+
+
+  digitalWrite(LED_PIN, LOW);
+
+
+  // --------------------------------------------------------
+  // SERVO
+  // --------------------------------------------------------
+
+  servoPuerta.setPeriodHertz(50);
+
+  servoPuerta.attach(
+    SERVO_PIN,
+    500,
+    2400
+  );
+
+
+  // Puerta inicialmente abierta
+  servoPuerta.write(ANGULO_ABIERTO);
+
+
+  // --------------------------------------------------------
+  // BUZZER
+  // --------------------------------------------------------
+
+  ledcAttach(
+    BUZZER_PIN,
+    2000,
+    8
+  );
+
+  apagarBuzzer();
+
+
+  // --------------------------------------------------------
+  // BLUETOOTH
+  // --------------------------------------------------------
+
+  SerialBT.begin("ESP32_ALARMA");
+
+
+  // --------------------------------------------------------
+  // MENSAJES
+  // --------------------------------------------------------
+
+  Serial.println();
+  Serial.println("==========================================");
+  Serial.println("       ESP32 - SISTEMA DE ALARMA");
+  Serial.println("==========================================");
+  Serial.println();
+  Serial.println("Bluetooth: ESP32_ALARMA");
+  Serial.println();
+  Serial.println("Servo  -> GPIO 23");
+  Serial.println("PIR    -> GPIO 25");
+  Serial.println("LED    -> GPIO 12");
+  Serial.println("Buzzer -> GPIO 15");
+  Serial.println();
+  Serial.println("Codigo de desbloqueo: 1234");
+  Serial.println();
+  Serial.println("Sistema LISTO");
+  Serial.println("==========================================");
+
+
+  enviarEstado();
+}
+
+
+// ==========================================================
+// LOOP
+// ==========================================================
+
+void loop()
+{
+  // --------------------------------------------------------
+  // REVISAR BLUETOOTH
+  // --------------------------------------------------------
+
+  revisarBluetooth();
+
+
+  // --------------------------------------------------------
+  // REVISAR PIR
+  // --------------------------------------------------------
+
+  revisarPIR();
+
+
+  // --------------------------------------------------------
+  // ACTUALIZAR BUZZER
+  // --------------------------------------------------------
+
+  actualizarBuzzer();
+}
