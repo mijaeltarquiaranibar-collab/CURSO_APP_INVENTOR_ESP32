@@ -1,0 +1,196 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+#include "BluetoothSerial.h"
+
+// -------------------------
+// PINES
+// -------------------------
+#define DHT_PIN 32
+#define DHT_TYPE DHT11
+#define BUZZER_PIN 15
+
+#define OLED_SDA 21
+#define OLED_SCL 22
+
+// -------------------------
+// OLED
+// -------------------------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 display(
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  &Wire,
+  -1
+);
+
+// -------------------------
+// DHT11
+// -------------------------
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// -------------------------
+// BLUETOOTH
+// -------------------------
+BluetoothSerial SerialBT;
+
+// -------------------------
+// VARIABLES
+// -------------------------
+float temperatura = 0;
+
+bool alarma = false;
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // Buzzer
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // DHT11
+  dht.begin();
+
+  // I2C OLED
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  // OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+
+    Serial.println("Error OLED");
+
+    while (true);
+  }
+
+  // Bluetooth
+  SerialBT.begin("ESP32_TEMP");
+
+  Serial.println("Bluetooth iniciado");
+
+  // Pantalla inicial
+  display.clearDisplay();
+
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(1);
+
+  display.setCursor(0, 0);
+  display.println("SISTEMA TEMPERATURA");
+
+  display.setCursor(0, 20);
+  display.println("Esperando sensor...");
+
+  display.display();
+
+  delay(2000);
+}
+
+void loop() {
+
+  // -------------------------
+  // LEER TEMPERATURA
+  // -------------------------
+
+  temperatura = dht.readTemperature();
+
+  // Verificar lectura
+  if (isnan(temperatura)) {
+
+    Serial.println("Error DHT11");
+
+    display.clearDisplay();
+
+    display.setTextSize(1);
+
+    display.setCursor(0, 0);
+    display.println("ERROR SENSOR DHT11");
+
+    display.display();
+
+    delay(1000);
+
+    return;
+  }
+
+  // -------------------------
+  // ALARMA
+  // -------------------------
+
+  if (temperatura > 24.0) {  //ajustar el rango de temperatura para la alarma
+
+    alarma = true;
+
+    // Buzzer pasivo
+    tone(BUZZER_PIN, 1000); // ajustar entre 500 y 2000 para la potencia de sonido
+
+  } else {
+
+    alarma = false;
+
+    noTone(BUZZER_PIN);
+  }
+
+  // -------------------------
+  // MOSTRAR EN OLED
+  // -------------------------
+
+  display.clearDisplay();
+
+  display.setTextColor(SSD1306_WHITE);
+
+  // Titulo
+  display.setTextSize(1);
+
+  display.setCursor(0, 0);
+  display.println("TEMPERATURA");
+
+  // Temperatura grande
+  display.setTextSize(2);
+
+  display.setCursor(0, 18);
+
+  display.print(temperatura, 1);
+  display.println(" C");
+
+  // Estado alarma
+  display.setTextSize(1);
+
+  display.setCursor(0, 48);
+
+  if (alarma) {
+
+    display.println("ALARMA: BUZZER ON");
+
+  } else {
+
+    display.println("ALARMA: BUZZER OFF");
+  }
+
+  display.display();
+
+  // -------------------------
+  // ENVIAR A APP INVENTOR
+  // -------------------------
+SerialBT.print(temperatura, 1);
+SerialBT.print(",");
+SerialBT.print(alarma ? "ON" : "OFF");
+SerialBT.print("#");
+
+  // Monitor serial
+  Serial.print("Temperatura: ");
+  Serial.print(temperatura, 1);
+
+  Serial.print(" C | Buzzer: ");
+
+  if (alarma) {
+    Serial.println("ON");
+  } else {
+    Serial.println("OFF");
+  }
+
+  delay(2000);
+}
