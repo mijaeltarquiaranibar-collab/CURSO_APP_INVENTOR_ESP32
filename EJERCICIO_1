@@ -16,41 +16,73 @@ BluetoothSerial SerialBT;
 #define BOTON2 17
 #define BOTON3 18
 
-// Estados de los LEDs controlados por App Inventor
-bool appLED1 = false;
-bool appLED2 = false;
-bool appLED3 = false;
+// ==========================
+// ESTADOS DE LOS LEDS
+// ==========================
 
-// Para detectar cambios en los botones físicos
+// Estado general de cada LED
+bool estadoLED1 = false;
+bool estadoLED2 = false;
+bool estadoLED3 = false;
+
+// Estados anteriores de los pulsadores
 bool estadoBoton1Anterior = LOW;
 bool estadoBoton2Anterior = LOW;
 bool estadoBoton3Anterior = LOW;
+
+// ==========================
+// REBOTE DE PULSADORES
+// ==========================
+
+unsigned long ultimoTiempoBoton1 = 0;
+unsigned long ultimoTiempoBoton2 = 0;
+unsigned long ultimoTiempoBoton3 = 0;
+
+const unsigned long TIEMPO_REBOTE = 50;
+
 
 void setup() {
 
   Serial.begin(115200);
 
-  // Bluetooth
+  // ==========================
+  // BLUETOOTH
+  // ==========================
+
   SerialBT.begin("ESP32_CONTROL_LEDS");
 
   Serial.println("ESP32 listo");
   Serial.println("Bluetooth: ESP32_CONTROL_LEDS");
 
-  // LEDs
+
+  // ==========================
+  // LEDS
+  // ==========================
+
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(LED3, OUTPUT);
 
-  // Pulsadores con PULL-DOWN externo
+
+  // ==========================
+  // PULSADORES
+  // PULL-DOWN EXTERNO
+  // ==========================
+
   pinMode(BOTON1, INPUT);
   pinMode(BOTON2, INPUT);
   pinMode(BOTON3, INPUT);
 
-  // LEDs apagados
+
+  // ==========================
+  // ESTADO INICIAL
+  // ==========================
+
   digitalWrite(LED1, LOW);
   digitalWrite(LED2, LOW);
   digitalWrite(LED3, LOW);
 }
+
 
 void loop() {
 
@@ -66,19 +98,40 @@ void loop() {
     Serial.print("Comando recibido: ");
     Serial.println(comando);
 
-    // LED 1
+
+    // -------------------------
+    // LED 1 DESDE APP
+    // -------------------------
+
     if (comando == "LED1") {
-      appLED1 = !appLED1;
+
+      estadoLED1 = !estadoLED1;
+
+      digitalWrite(LED1, estadoLED1);
     }
 
-    // LED 2
+
+    // -------------------------
+    // LED 2 DESDE APP
+    // -------------------------
+
     if (comando == "LED2") {
-      appLED2 = !appLED2;
+
+      estadoLED2 = !estadoLED2;
+
+      digitalWrite(LED2, estadoLED2);
     }
 
-    // LED 3
+
+    // -------------------------
+    // LED 3 DESDE APP
+    // -------------------------
+
     if (comando == "LED3") {
-      appLED3 = !appLED3;
+
+      estadoLED3 = !estadoLED3;
+
+      digitalWrite(LED3, estadoLED3);
     }
   }
 
@@ -93,35 +146,70 @@ void loop() {
 
 
   // =================================================
-  // 3. CONTROL DE LOS LEDS
+  // 3. PULSADOR 1 → TOGGLE LED 1
   // =================================================
 
-  // LED 1
-  if (boton1 == HIGH || appLED1 == true) {
-    digitalWrite(LED1, HIGH);
-  } 
-  else {
-    digitalWrite(LED1, LOW);
+  if (boton1 == HIGH && estadoBoton1Anterior == LOW) {
+
+    if (millis() - ultimoTiempoBoton1 > TIEMPO_REBOTE) {
+
+      estadoLED1 = !estadoLED1;
+
+      digitalWrite(LED1, estadoLED1);
+
+      Serial.print("BOTON1 -> LED1: ");
+      Serial.println(estadoLED1 ? "ON" : "OFF");
+
+      ultimoTiempoBoton1 = millis();
+    }
   }
 
+  estadoBoton1Anterior = boton1;
 
-  // LED 2
-  if (boton2 == HIGH || appLED2 == true) {
-    digitalWrite(LED2, HIGH);
-  } 
-  else {
-    digitalWrite(LED2, LOW);
+
+  // =================================================
+  // 4. PULSADOR 2 → TOGGLE LED 2
+  // =================================================
+
+  if (boton2 == HIGH && estadoBoton2Anterior == LOW) {
+
+    if (millis() - ultimoTiempoBoton2 > TIEMPO_REBOTE) {
+
+      estadoLED2 = !estadoLED2;
+
+      digitalWrite(LED2, estadoLED2);
+
+      Serial.print("BOTON2 -> LED2: ");
+      Serial.println(estadoLED2 ? "ON" : "OFF");
+
+      ultimoTiempoBoton2 = millis();
+    }
   }
 
+  estadoBoton2Anterior = boton2;
 
-  // LED 3
-  if (boton3 == HIGH || appLED3 == true) {
-    digitalWrite(LED3, HIGH);
-  } 
-  else {
-    digitalWrite(LED3, LOW);
+
+  // =================================================
+  // 5. PULSADOR 3 → TOGGLE LED 3
+  // =================================================
+
+  if (boton3 == HIGH && estadoBoton3Anterior == LOW) {
+
+    if (millis() - ultimoTiempoBoton3 > TIEMPO_REBOTE) {
+
+      estadoLED3 = !estadoLED3;
+
+      digitalWrite(LED3, estadoLED3);
+
+      Serial.print("BOTON3 -> LED3: ");
+      Serial.println(estadoLED3 ? "ON" : "OFF");
+
+      ultimoTiempoBoton3 = millis();
+    }
   }
 
+  estadoBoton3Anterior = boton3;
 
-  delay(10);
+
+  delay(5);
 }
