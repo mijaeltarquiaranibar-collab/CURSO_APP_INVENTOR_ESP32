@@ -1,0 +1,277 @@
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "BluetoothSerial.h"
+
+// =====================================================
+// PINES
+// =====================================================
+
+#define PIN_TRIG 26
+#define PIN_ECHO 27
+
+#define OLED_SDA 21
+#define OLED_SCL 22
+
+// =====================================================
+// OLED
+// =====================================================
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 oled(
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  &Wire,
+  -1
+);
+
+// =====================================================
+// BLUETOOTH
+// =====================================================
+
+BluetoothSerial SerialBT;
+
+
+// =====================================================
+// VARIABLES
+// =====================================================
+
+float distancia = 0.0;
+
+
+// =====================================================
+// MEDIR DISTANCIA
+// =====================================================
+
+float medirDistancia()
+{
+  // Generar pulso de disparo
+
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(PIN_TRIG, LOW);
+
+
+  // Medir tiempo del ECHO
+
+  long duracion = pulseIn(
+    PIN_ECHO,
+    HIGH,
+    30000
+  );
+
+
+  // Si no hubo respuesta
+
+  if (duracion == 0)
+  {
+    return -1;
+  }
+
+
+  // Calcular distancia
+
+  float distanciaCM =
+    duracion * 0.0343 / 2.0;
+
+
+  return distanciaCM;
+}
+
+
+// =====================================================
+// MOSTRAR EN OLED
+// =====================================================
+
+void mostrarOLED(float distancia)
+{
+  oled.clearDisplay();
+
+  oled.setTextColor(SSD1306_WHITE);
+
+
+  // ---------------------------------------------------
+  // Título
+  // ---------------------------------------------------
+
+  oled.setTextSize(1);
+
+  oled.setCursor(25, 5);
+
+  oled.println("DISTANCIA");
+
+
+  // ---------------------------------------------------
+  // Distancia
+  // ---------------------------------------------------
+
+  oled.setTextSize(2);
+
+  oled.setCursor(20, 25);
+
+
+  if (distancia < 0)
+  {
+    oled.println("ERROR");
+  }
+  else
+  {
+    oled.print(distancia, 1);
+    oled.println(" cm");
+  }
+
+
+  // ---------------------------------------------------
+  // Mostrar
+  // ---------------------------------------------------
+
+  oled.display();
+}
+
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  // ---------------------------------------------------
+  // Serial
+  // ---------------------------------------------------
+
+  Serial.begin(115200);
+
+
+  // ---------------------------------------------------
+  // Pines ultrasónico
+  // ---------------------------------------------------
+
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+
+  digitalWrite(PIN_TRIG, LOW);
+
+
+  // ---------------------------------------------------
+  // OLED
+  // ---------------------------------------------------
+
+  Wire.begin(
+    OLED_SDA,
+    OLED_SCL
+  );
+
+
+  if (!oled.begin(
+        SSD1306_SWITCHCAPVCC,
+        0x3C
+      ))
+  {
+    Serial.println("ERROR OLED");
+
+    while (true)
+    {
+      delay(1000);
+    }
+  }
+
+
+  oled.clearDisplay();
+
+  oled.setTextColor(SSD1306_WHITE);
+
+  oled.setTextSize(1);
+
+  oled.setCursor(20, 10);
+
+  oled.println("ESP32");
+
+  oled.setCursor(10, 30);
+
+  oled.println("MEDIDOR DISTANCIA");
+
+  oled.display();
+
+  delay(2000);
+
+
+  // ---------------------------------------------------
+  // Bluetooth
+  // ---------------------------------------------------
+
+  SerialBT.begin("ESP32_MEDIDOR");
+
+
+  Serial.println();
+  Serial.println("==============================");
+  Serial.println("ESP32 MEDIDOR DE DISTANCIA");
+  Serial.println("==============================");
+  Serial.println("Bluetooth: ESP32_MEDIDOR");
+  Serial.println("Esperando conexion...");
+}
+
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+  // ---------------------------------------------------
+  // Medir distancia
+  // ---------------------------------------------------
+
+  distancia = medirDistancia();
+
+
+  // ---------------------------------------------------
+  // Mostrar en OLED
+  // ---------------------------------------------------
+
+  mostrarOLED(distancia);
+
+
+  // ---------------------------------------------------
+  // Mostrar por Monitor Serial
+  // ---------------------------------------------------
+
+  if (distancia < 0)
+  {
+    Serial.println("Distancia: ERROR");
+  }
+  else
+  {
+    Serial.print("Distancia: ");
+    Serial.print(distancia, 1);
+    Serial.println(" cm");
+  }
+
+
+  // ---------------------------------------------------
+  // Enviar por Bluetooth
+  // ---------------------------------------------------
+
+  if (distancia >= 0)
+  {
+    SerialBT.print(distancia, 1);
+    SerialBT.println(" cm");
+  }
+  else
+  {
+    SerialBT.println("ERROR");
+  }
+
+
+  // ---------------------------------------------------
+  // Esperar
+  // ---------------------------------------------------
+
+  delay(500);
+}
