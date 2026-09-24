@@ -119,22 +119,22 @@ void enviarEstado()
 
   if (alarmaActiva)
   {
-    mensaje += "ON";
+    mensaje += "LED ON";
   }
   else
   {
-    mensaje += "OFF";
+    mensaje += "LED OFF";
   }
 
   mensaje += "|BUZZER:";
 
   if (alarmaActiva)
   {
-    mensaje += "ON";
+    mensaje += "BUZZER ON";
   }
   else
   {
-    mensaje += "OFF";
+    mensaje += "BUZZER OFF";
   }
 
 
