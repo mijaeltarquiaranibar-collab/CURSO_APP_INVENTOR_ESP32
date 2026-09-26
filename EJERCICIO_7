@@ -1,0 +1,454 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// =====================================================
+// CONFIGURACION WIFI
+// =====================================================
+
+const char* ssid = "id";
+const char* password = "password";
+
+// =====================================================
+// PINES
+// =====================================================
+
+#define PIN_RELE    19
+#define PIN_MARCHA  16
+#define PIN_PARO    17
+#define PIN_PWM     33
+
+// =====================================================
+// PWM
+// =====================================================
+
+const int PWM_FRECUENCIA = 5000;
+const int PWM_RESOLUCION = 8;
+
+// Valor PWM 0 - 255
+int valorPWM = 0;
+
+// Porcentaje PWM 0 - 100
+int porcentajePWM = 0;
+
+// =====================================================
+// ESTADO DEL RELE
+// =====================================================
+
+bool estadoRele = false;
+
+// =====================================================
+// SERVIDOR WEB
+// =====================================================
+
+WebServer server(80);
+
+// =====================================================
+// ANTIRREBOTE
+// =====================================================
+
+unsigned long ultimoTiempoMarcha = 0;
+unsigned long ultimoTiempoParo = 0;
+
+const unsigned long tiempoDebounce = 200;
+
+// =====================================================
+// CONTROL DEL RELE
+// =====================================================
+
+void activarRele()
+{
+  estadoRele = true;
+
+  digitalWrite(PIN_RELE, HIGH);
+}
+
+void desactivarRele()
+{
+  estadoRele = false;
+
+  digitalWrite(PIN_RELE, LOW);
+}
+
+// =====================================================
+// CONTROL PWM
+// =====================================================
+
+void establecerPWM(int porcentaje)
+{
+  // Limitar entre 0 y 100
+  porcentaje = constrain(porcentaje, 0, 100);
+
+  // Guardar porcentaje
+  porcentajePWM = porcentaje;
+
+  // Convertir 0-100 % a 0-255
+  valorPWM = map(
+    porcentajePWM,
+    0,
+    100,
+    255,
+    0
+  );
+
+  // Aplicar PWM
+  ledcWrite(
+    PIN_PWM,
+    valorPWM
+  );
+
+  // Monitor serie
+  Serial.print("PWM: ");
+  Serial.print(porcentajePWM);
+  Serial.print("%  Valor: ");
+  Serial.println(valorPWM);
+}
+
+// =====================================================
+// PAGINA PRINCIPAL
+// =====================================================
+
+void handleRoot()
+{
+  String html;
+
+  html += "<!DOCTYPE html>";
+  html += "<html>";
+  html += "<head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>ESP32 Control</title>";
+  html += "</head>";
+
+  html += "<body>";
+
+  html += "<h2>ESP32 CONTROL WIFI</h2>";
+
+  html += "<p>IP: ";
+  html += WiFi.localIP().toString();
+  html += "</p>";
+
+  html += "<p>RELE: ";
+
+  if (estadoRele)
+    html += "ON";
+  else
+    html += "OFF";
+
+  html += "</p>";
+
+  html += "<p>PWM: ";
+  html += String(porcentajePWM);
+  html += "%</p>";
+
+  html += "<hr>";
+
+  html += "<a href='/rele/on'>";
+  html += "<button style='font-size:25px'>MARCHA</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/rele/off'>";
+  html += "<button style='font-size:25px'>PARO</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<form action='/pwm'>";
+
+  html += "<input type='range' name='valor' ";
+  html += "min='0' max='100' value='";
+  html += String(porcentajePWM);
+  html += "'>";
+
+  html += "<br><br>";
+
+  html += "<input type='submit' value='ACTUALIZAR PWM'>";
+
+  html += "</form>";
+
+  html += "</body>";
+  html += "</html>";
+
+  server.send(
+    200,
+    "text/html",
+    html
+  );
+}
+
+// =====================================================
+// HTTP MARCHA
+// =====================================================
+
+void handleReleOn()
+{
+  activarRele();
+
+  server.send(
+    200,
+    "text/plain",
+    "RELE ON"
+  );
+}
+
+// =====================================================
+// HTTP PARO
+// =====================================================
+
+void handleReleOff()
+{
+  desactivarRele();
+
+  server.send(
+    200,
+    "text/plain",
+    "RELE OFF"
+  );
+}
+
+// =====================================================
+// HTTP PWM
+// =====================================================
+
+void handlePWM()
+{
+  if (server.hasArg("valor"))
+  {
+    int valor = server.arg("valor").toInt();
+
+    establecerPWM(valor);
+
+    String respuesta;
+
+    respuesta = "PWM=";
+    respuesta += String(porcentajePWM);
+    respuesta += "%";
+
+    server.send(
+      200,
+      "text/plain",
+      respuesta
+    );
+  }
+  else
+  {
+    server.send(
+      400,
+      "text/plain",
+      "Falta parametro valor"
+    );
+  }
+}
+
+// =====================================================
+// ESTADO
+// =====================================================
+
+void handleEstado()
+{
+  String respuesta = "";
+
+  respuesta += "RELE=";
+
+  if (estadoRele)
+    respuesta += "ON";
+  else
+    respuesta += "OFF";
+
+  respuesta += ";PWM=";
+  respuesta += String(porcentajePWM);
+
+  server.send(
+    200,
+    "text/plain",
+    respuesta
+  );
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  // ===================================================
+  // PINES
+  // ===================================================
+
+  pinMode(PIN_RELE, OUTPUT);
+
+  // Pulsadores con PULL-DOWN EXTERNO
+  pinMode(PIN_MARCHA, INPUT);
+  pinMode(PIN_PARO, INPUT);
+
+  // NO usar pinMode(PIN_PWM, OUTPUT)
+  // porque LEDC se encarga del pin
+
+  // Estado inicial del rele
+  digitalWrite(
+    PIN_RELE,
+    LOW
+  );
+
+  // ===================================================
+  // PWM
+  // ===================================================
+
+  Serial.println();
+  Serial.println("Inicializando PWM...");
+
+  bool pwmOK = ledcAttach(
+    PIN_PWM,
+    PWM_FRECUENCIA,
+    PWM_RESOLUCION
+  );
+
+  if (!pwmOK)
+  {
+    Serial.println("ERROR AL INICIAR PWM");
+
+    while (true)
+    {
+      delay(1000);
+    }
+  }
+
+  Serial.println("PWM iniciado correctamente");
+
+  Serial.print("Pin PWM: ");
+  Serial.println(PIN_PWM);
+
+  Serial.print("Frecuencia: ");
+  Serial.println(PWM_FRECUENCIA);
+
+  Serial.print("Resolucion: ");
+  Serial.println(PWM_RESOLUCION);
+
+  // PWM inicial = 0%
+  establecerPWM(0);
+
+  // ===================================================
+  // WIFI
+  // ===================================================
+
+  WiFi.begin(
+    ssid,
+    password
+  );
+
+  Serial.print(
+    "Conectando a WiFi"
+  );
+
+  while (
+    WiFi.status() != WL_CONNECTED
+  )
+  {
+    delay(500);
+
+    Serial.print(".");
+  }
+
+  Serial.println();
+
+  Serial.println(
+    "WiFi conectado"
+  );
+
+  Serial.print(
+    "IP: "
+  );
+
+  Serial.println(
+    WiFi.localIP()
+  );
+
+  // ===================================================
+  // SERVIDOR WEB
+  // ===================================================
+
+  server.on(
+    "/",
+    handleRoot
+  );
+
+  server.on(
+    "/rele/on",
+    handleReleOn
+  );
+
+  server.on(
+    "/rele/off",
+    handleReleOff
+  );
+
+  server.on(
+    "/pwm",
+    handlePWM
+  );
+
+  server.on(
+    "/estado",
+    handleEstado
+  );
+
+  server.begin();
+
+  Serial.println(
+    "Servidor HTTP iniciado"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+  // ===================================================
+  // SERVIDOR WEB
+  // ===================================================
+
+  server.handleClient();
+
+  // ===================================================
+  // BOTON MARCHA
+  // ===================================================
+
+  if (
+    digitalRead(PIN_MARCHA) == HIGH
+  )
+  {
+    if (
+      millis() - ultimoTiempoMarcha >
+      tiempoDebounce
+    )
+    {
+      activarRele();
+
+      ultimoTiempoMarcha = millis();
+    }
+  }
+
+  // ===================================================
+  // BOTON PARO
+  // ===================================================
+
+  if (
+    digitalRead(PIN_PARO) == HIGH
+  )
+  {
+    if (
+      millis() - ultimoTiempoParo >
+      tiempoDebounce
+    )
+    {
+      desactivarRele();
+
+      ultimoTiempoParo = millis();
+    }
+  }
+}
