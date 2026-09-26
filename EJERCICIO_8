@@ -1,0 +1,633 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// =====================================================
+// CONFIGURACION WIFI
+// =====================================================
+
+const char* ssid = "ID";
+const char* password = "PASSWORD";
+
+// =====================================================
+// PULSADORES
+// =====================================================
+
+#define PIN_PULSADOR_1 16
+#define PIN_PULSADOR_2 17
+#define PIN_PULSADOR_3 18
+
+// =====================================================
+// SALIDAS
+// =====================================================
+
+#define PIN_RELE   19
+#define PIN_LED    12
+#define PIN_BUZZER 15
+
+// =====================================================
+// BUZZER PASIVO
+// =====================================================
+
+const int FRECUENCIA_BUZZER = 1000;
+
+// =====================================================
+// ESTADOS
+// =====================================================
+
+bool estadoRele = false;
+bool estadoLed = false;
+bool estadoBuzzer = false;
+
+// =====================================================
+// SERVIDOR WEB
+// =====================================================
+
+WebServer server(80);
+
+// =====================================================
+// ANTIRREBOTE
+// =====================================================
+
+unsigned long ultimoTiempoP1 = 0;
+unsigned long ultimoTiempoP2 = 0;
+unsigned long ultimoTiempoP3 = 0;
+
+const unsigned long tiempoDebounce = 200;
+
+// =====================================================
+// ESTADOS ANTERIORES DE PULSADORES
+// =====================================================
+
+bool estadoAnteriorP1 = LOW;
+bool estadoAnteriorP2 = LOW;
+bool estadoAnteriorP3 = LOW;
+
+// =====================================================
+// CONTROL RELÉ
+// =====================================================
+
+void activarRele()
+{
+  estadoRele = true;
+
+  digitalWrite(
+    PIN_RELE,
+    HIGH
+  );
+}
+
+void desactivarRele()
+{
+  estadoRele = false;
+
+  digitalWrite(
+    PIN_RELE,
+    LOW
+  );
+}
+
+void cambiarRele()
+{
+  if (estadoRele)
+    desactivarRele();
+  else
+    activarRele();
+}
+
+// =====================================================
+// CONTROL LED
+// =====================================================
+
+void activarLed()
+{
+  estadoLed = true;
+
+  digitalWrite(
+    PIN_LED,
+    HIGH
+  );
+}
+
+void desactivarLed()
+{
+  estadoLed = false;
+
+  digitalWrite(
+    PIN_LED,
+    LOW
+  );
+}
+
+void cambiarLed()
+{
+  if (estadoLed)
+    desactivarLed();
+  else
+    activarLed();
+}
+
+// =====================================================
+// CONTROL BUZZER
+// =====================================================
+
+void activarBuzzer()
+{
+  estadoBuzzer = true;
+
+  ledcWriteTone(
+    PIN_BUZZER,
+    FRECUENCIA_BUZZER
+  );
+}
+
+void desactivarBuzzer()
+{
+  estadoBuzzer = false;
+
+  ledcWriteTone(
+    PIN_BUZZER,
+    0
+  );
+}
+
+void cambiarBuzzer()
+{
+  if (estadoBuzzer)
+    desactivarBuzzer();
+  else
+    activarBuzzer();
+}
+
+// =====================================================
+// PAGINA PRINCIPAL
+// =====================================================
+
+void handleRoot()
+{
+  String html;
+
+  html += "<!DOCTYPE html>";
+  html += "<html>";
+  html += "<head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>ESP32 CONTROL</title>";
+  html += "</head>";
+
+  html += "<body>";
+
+  html += "<h2>ESP32 CONTROL WIFI</h2>";
+
+  html += "<p>IP: ";
+  html += WiFi.localIP().toString();
+  html += "</p>";
+
+  html += "<p>RELE: ";
+
+  if (estadoRele)
+    html += "ON";
+  else
+    html += "OFF";
+
+  html += "</p>";
+
+  html += "<p>LED: ";
+
+  if (estadoLed)
+    html += "ON";
+  else
+    html += "OFF";
+
+  html += "</p>";
+
+  html += "<p>BUZZER: ";
+
+  if (estadoBuzzer)
+    html += "ON";
+  else
+    html += "OFF";
+
+  html += "</p>";
+
+  html += "<hr>";
+
+  html += "<a href='/rele/on'>";
+  html += "<button style='font-size:25px'>RELE ON</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/rele/off'>";
+  html += "<button style='font-size:25px'>RELE OFF</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/led/on'>";
+  html += "<button style='font-size:25px'>LED ON</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/led/off'>";
+  html += "<button style='font-size:25px'>LED OFF</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/buzzer/on'>";
+  html += "<button style='font-size:25px'>BUZZER ON</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/buzzer/off'>";
+  html += "<button style='font-size:25px'>BUZZER OFF</button>";
+  html += "</a>";
+
+  html += "</body>";
+  html += "</html>";
+
+  server.send(
+    200,
+    "text/html",
+    html
+  );
+}
+
+// =====================================================
+// HTTP RELÉ ON
+// =====================================================
+
+void handleReleOn()
+{
+  activarRele();
+
+  server.send(
+    200,
+    "text/plain",
+    "RELE=ON"
+  );
+}
+
+// =====================================================
+// HTTP RELÉ OFF
+// =====================================================
+
+void handleReleOff()
+{
+  desactivarRele();
+
+  server.send(
+    200,
+    "text/plain",
+    "RELE=OFF"
+  );
+}
+
+// =====================================================
+// HTTP LED ON
+// =====================================================
+
+void handleLedOn()
+{
+  activarLed();
+
+  server.send(
+    200,
+    "text/plain",
+    "LED=ON"
+  );
+}
+
+// =====================================================
+// HTTP LED OFF
+// =====================================================
+
+void handleLedOff()
+{
+  desactivarLed();
+
+  server.send(
+    200,
+    "text/plain",
+    "LED=OFF"
+  );
+}
+
+// =====================================================
+// HTTP BUZZER ON
+// =====================================================
+
+void handleBuzzerOn()
+{
+  activarBuzzer();
+
+  server.send(
+    200,
+    "text/plain",
+    "BUZZER=ON"
+  );
+}
+
+// =====================================================
+// HTTP BUZZER OFF
+// =====================================================
+
+void handleBuzzerOff()
+{
+  desactivarBuzzer();
+
+  server.send(
+    200,
+    "text/plain",
+    "BUZZER=OFF"
+  );
+}
+
+// =====================================================
+// ESTADO
+// =====================================================
+
+void handleEstado()
+{
+  String respuesta = "";
+
+  respuesta += "RELE=";
+
+  if (estadoRele)
+    respuesta += "ON";
+  else
+    respuesta += "OFF";
+
+  respuesta += ";LED=";
+
+  if (estadoLed)
+    respuesta += "ON";
+  else
+    respuesta += "OFF";
+
+  respuesta += ";BUZZER=";
+
+  if (estadoBuzzer)
+    respuesta += "ON";
+  else
+    respuesta += "OFF";
+
+  server.send(
+    200,
+    "text/plain",
+    respuesta
+  );
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  // ===================================================
+  // ENTRADAS
+  // ===================================================
+
+  // PULL-DOWN EXTERNO
+  pinMode(
+    PIN_PULSADOR_1,
+    INPUT
+  );
+
+  pinMode(
+    PIN_PULSADOR_2,
+    INPUT
+  );
+
+  pinMode(
+    PIN_PULSADOR_3,
+    INPUT
+  );
+
+  // ===================================================
+  // SALIDAS
+  // ===================================================
+
+  pinMode(
+    PIN_RELE,
+    OUTPUT
+  );
+
+  pinMode(
+    PIN_LED,
+    OUTPUT
+  );
+
+  // ===================================================
+  // ESTADO INICIAL
+  // ===================================================
+
+  digitalWrite(
+    PIN_RELE,
+    LOW
+  );
+
+  digitalWrite(
+    PIN_LED,
+    LOW
+  );
+
+  // ===================================================
+  // BUZZER
+  // ===================================================
+
+  if (!ledcAttach(
+        PIN_BUZZER,
+        FRECUENCIA_BUZZER,
+        8))
+  {
+    Serial.println(
+      "ERROR AL INICIAR BUZZER"
+    );
+
+    while (true)
+    {
+      delay(1000);
+    }
+  }
+
+  ledcWriteTone(
+    PIN_BUZZER,
+    0
+  );
+
+  // ===================================================
+  // WIFI
+  // ===================================================
+
+  WiFi.begin(
+    ssid,
+    password
+  );
+
+  Serial.print(
+    "Conectando a WiFi"
+  );
+
+  while (
+    WiFi.status() != WL_CONNECTED
+  )
+  {
+    delay(500);
+
+    Serial.print(".");
+  }
+
+  Serial.println();
+
+  Serial.println(
+    "WiFi conectado"
+  );
+
+  Serial.print(
+    "IP: "
+  );
+
+  Serial.println(
+    WiFi.localIP()
+  );
+
+  // ===================================================
+  // SERVIDOR WEB
+  // ===================================================
+
+  server.on(
+    "/",
+    handleRoot
+  );
+
+  server.on(
+    "/rele/on",
+    handleReleOn
+  );
+
+  server.on(
+    "/rele/off",
+    handleReleOff
+  );
+
+  server.on(
+    "/led/on",
+    handleLedOn
+  );
+
+  server.on(
+    "/led/off",
+    handleLedOff
+  );
+
+  server.on(
+    "/buzzer/on",
+    handleBuzzerOn
+  );
+
+  server.on(
+    "/buzzer/off",
+    handleBuzzerOff
+  );
+
+  server.on(
+    "/estado",
+    handleEstado
+  );
+
+  server.begin();
+
+  Serial.println(
+    "Servidor HTTP iniciado"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+  server.handleClient();
+
+  // ===================================================
+  // PULSADOR 1 → RELÉ
+  // ===================================================
+
+  bool lecturaP1 =
+    digitalRead(PIN_PULSADOR_1);
+
+  if (
+    lecturaP1 == HIGH &&
+    estadoAnteriorP1 == LOW
+  )
+  {
+    if (
+      millis() - ultimoTiempoP1 >
+      tiempoDebounce
+    )
+    {
+      cambiarRele();
+
+      ultimoTiempoP1 = millis();
+    }
+  }
+
+  estadoAnteriorP1 = lecturaP1;
+
+  // ===================================================
+  // PULSADOR 2 → LED
+  // ===================================================
+
+  bool lecturaP2 =
+    digitalRead(PIN_PULSADOR_2);
+
+  if (
+    lecturaP2 == HIGH &&
+    estadoAnteriorP2 == LOW
+  )
+  {
+    if (
+      millis() - ultimoTiempoP2 >
+      tiempoDebounce
+    )
+    {
+      cambiarLed();
+
+      ultimoTiempoP2 = millis();
+    }
+  }
+
+  estadoAnteriorP2 = lecturaP2;
+
+  // ===================================================
+  // PULSADOR 3 → BUZZER
+  // ===================================================
+
+  bool lecturaP3 =
+    digitalRead(PIN_PULSADOR_3);
+
+  if (
+    lecturaP3 == HIGH &&
+    estadoAnteriorP3 == LOW
+  )
+  {
+    if (
+      millis() - ultimoTiempoP3 >
+      tiempoDebounce
+    )
+    {
+      cambiarBuzzer();
+
+      ultimoTiempoP3 = millis();
+    }
+  }
+
+  estadoAnteriorP3 = lecturaP3;
+}
