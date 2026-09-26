@@ -1,0 +1,490 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+
+// =====================================================
+// CONFIGURACION WIFI
+// =====================================================
+
+const char* ssid = "id";
+const char* password = "password";
+
+// =====================================================
+// PINES
+// =====================================================
+
+#define PIN_DHT        32
+#define TIPO_DHT       DHT11
+
+#define PIN_FLAMA      4
+
+#define PIN_BOTON      16
+
+#define PIN_RELE       19
+
+// =====================================================
+// SENSOR DHT11
+// =====================================================
+
+DHT dht(
+  PIN_DHT,
+  TIPO_DHT
+);
+
+// =====================================================
+// SERVIDOR WEB
+// =====================================================
+
+WebServer server(80);
+
+// =====================================================
+// VARIABLES
+// =====================================================
+
+float temperatura = 0.0;
+float humedad = 0.0;
+
+bool estadoFlama = false;
+bool estadoRociador = false;
+
+// =====================================================
+// ANTIRREBOTE BOTON
+// =====================================================
+
+unsigned long ultimoTiempoBoton = 0;
+
+const unsigned long tiempoDebounce = 200;
+
+// =====================================================
+// ESTADO ANTERIOR BOTON
+// =====================================================
+
+bool estadoAnteriorBoton = LOW;
+
+// =====================================================
+// LEER DHT11
+// =====================================================
+
+void leerDHT()
+{
+  float nuevaHumedad =
+    dht.readHumidity();
+
+  float nuevaTemperatura =
+    dht.readTemperature();
+
+  // Comprobar lectura
+  if (
+    !isnan(nuevaHumedad) &&
+    !isnan(nuevaTemperatura)
+  )
+  {
+    humedad = nuevaHumedad;
+
+    temperatura = nuevaTemperatura;
+  }
+  else
+  {
+    Serial.println(
+      "Error leyendo DHT11"
+    );
+  }
+}
+
+// =====================================================
+// LEER SENSOR DE FLAMA
+// =====================================================
+
+void leerFlama()
+{
+  int lectura =
+    digitalRead(PIN_FLAMA);
+
+  /*
+     Muchos módulos de flama entregan:
+
+     LOW  = FLAMA DETECTADA
+     HIGH = SIN FLAMA
+
+     Si tu módulo funciona al contrario,
+     invertiremos esta lógica.
+  */
+
+  if (lectura == LOW)
+  {
+    estadoFlama = true;
+  }
+  else
+  {
+    estadoFlama = false;
+  }
+}
+
+// =====================================================
+// ACTIVAR ROCIADOR
+// =====================================================
+
+void activarRociador()
+{
+  estadoRociador = true;
+
+  digitalWrite(
+    PIN_RELE,
+    HIGH
+  );
+
+  Serial.println(
+    "ROCIADOR ACTIVADO"
+  );
+}
+
+// =====================================================
+// DESACTIVAR ROCIADOR
+// =====================================================
+
+void desactivarRociador()
+{
+  estadoRociador = false;
+
+  digitalWrite(
+    PIN_RELE,
+    LOW
+  );
+
+  Serial.println(
+    "ROCIADOR DESACTIVADO"
+  );
+}
+
+// =====================================================
+// JSON DE ESTADO
+// =====================================================
+
+void enviarEstadoJSON()
+{
+  leerDHT();
+  leerFlama();
+
+  String json = "{";
+
+  json += "\"temperatura\":";
+  json += String(
+    temperatura,
+    1
+  );
+
+  json += ",";
+
+  json += "\"humedad\":";
+  json += String(
+    humedad,
+    1
+  );
+
+  json += ",";
+
+  json += "\"flama\":";
+
+  if (estadoFlama)
+    json += "true";
+  else
+    json += "false";
+
+  json += ",";
+
+  json += "\"rociador\":";
+
+  if (estadoRociador)
+    json += "true";
+  else
+    json += "false";
+
+  json += "}";
+
+  server.send(
+    200,
+    "application/json",
+    json
+  );
+}
+
+// =====================================================
+// PAGINA PRINCIPAL
+// =====================================================
+
+void handleRoot()
+{
+  String html;
+
+  html += "<!DOCTYPE html>";
+  html += "<html>";
+
+  html += "<head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' ";
+  html += "content='width=device-width,initial-scale=1'>";
+  html += "<title>Domotica ESP32</title>";
+  html += "</head>";
+
+  html += "<body>";
+
+  html += "<h2>SISTEMA DOMOTICO</h2>";
+
+  html += "<p>IP: ";
+  html += WiFi.localIP().toString();
+  html += "</p>";
+
+  html += "<p>Temperatura: ";
+  html += String(temperatura, 1);
+  html += " °C</p>";
+
+  html += "<p>Humedad: ";
+  html += String(humedad, 1);
+  html += " %</p>";
+
+  html += "<p>Flama: ";
+
+  if (estadoFlama)
+    html += "DETECTADA";
+  else
+    html += "NO DETECTADA";
+
+  html += "</p>";
+
+  html += "<p>Rociador: ";
+
+  if (estadoRociador)
+    html += "ACTIVADO";
+  else
+    html += "APAGADO";
+
+  html += "</p>";
+
+  html += "<hr>";
+
+  html += "<a href='/rociador/on'>";
+  html += "<button style='font-size:25px'>";
+  html += "ACTIVAR ROCIADOR";
+  html += "</button>";
+  html += "</a>";
+
+  html += "<br><br>";
+
+  html += "<a href='/rociador/off'>";
+  html += "<button style='font-size:25px'>";
+  html += "APAGAR ROCIADOR";
+  html += "</button>";
+  html += "</a>";
+
+  html += "</body>";
+  html += "</html>";
+
+  server.send(
+    200,
+    "text/html",
+    html
+  );
+}
+
+// =====================================================
+// HTTP ROCIADOR ON
+// =====================================================
+
+void handleRociadorOn()
+{
+  activarRociador();
+
+  String json;
+
+  json = "{";
+  json += "\"rociador\":true";
+  json += "}";
+
+  server.send(
+    200,
+    "application/json",
+    json
+  );
+}
+
+// =====================================================
+// HTTP ROCIADOR OFF
+// =====================================================
+
+void handleRociadorOff()
+{
+  desactivarRociador();
+
+  String json;
+
+  json = "{";
+  json += "\"rociador\":false";
+  json += "}";
+
+  server.send(
+    200,
+    "application/json",
+    json
+  );
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  // ===================================================
+  // DHT11
+  // ===================================================
+
+  dht.begin();
+
+  // ===================================================
+  // PINES
+  // ===================================================
+
+  // Sensor de flama
+  pinMode(
+    PIN_FLAMA,
+    INPUT
+  );
+
+  // Botón con PULL-DOWN externo
+  pinMode(
+    PIN_BOTON,
+    INPUT
+  );
+
+  // Relé
+  pinMode(
+    PIN_RELE,
+    OUTPUT
+  );
+
+  // Estado inicial
+  digitalWrite(
+    PIN_RELE,
+    LOW
+  );
+
+  // ===================================================
+  // WIFI
+  // ===================================================
+
+  WiFi.begin(
+    ssid,
+    password
+  );
+
+  Serial.print(
+    "Conectando a WiFi"
+  );
+
+  while (
+    WiFi.status() != WL_CONNECTED
+  )
+  {
+    delay(500);
+
+    Serial.print(".");
+  }
+
+  Serial.println();
+
+  Serial.println(
+    "WiFi conectado"
+  );
+
+  Serial.print(
+    "IP: "
+  );
+
+  Serial.println(
+    WiFi.localIP()
+  );
+
+  // ===================================================
+  // RUTAS HTTP
+  // ===================================================
+
+  server.on(
+    "/",
+    handleRoot
+  );
+
+  server.on(
+    "/estado",
+    enviarEstadoJSON
+  );
+
+  server.on(
+    "/rociador/on",
+    handleRociadorOn
+  );
+
+  server.on(
+    "/rociador/off",
+    handleRociadorOff
+  );
+
+  // ===================================================
+  // SERVIDOR
+  // ===================================================
+
+  server.begin();
+
+  Serial.println(
+    "Servidor HTTP iniciado"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+  // ===================================================
+  // SERVIDOR
+  // ===================================================
+
+  server.handleClient();
+
+  // ===================================================
+  // LEER BOTON FISICO
+  // ===================================================
+
+  bool lecturaBoton =
+    digitalRead(PIN_BOTON);
+
+  // Detectar flanco de subida
+  if (
+    lecturaBoton == HIGH &&
+    estadoAnteriorBoton == LOW
+  )
+  {
+    if (
+      millis() - ultimoTiempoBoton >
+      tiempoDebounce
+    )
+    {
+      if (estadoRociador)
+      {
+        desactivarRociador();
+      }
+      else
+      {
+        activarRociador();
+      }
+
+      ultimoTiempoBoton =
+        millis();
+    }
+  }
+
+  estadoAnteriorBoton =
+    lecturaBoton;
+}
