@@ -1,0 +1,565 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include <DHT.h>
+
+// =====================================================
+// WIFI
+// =====================================================
+
+const char* WIFI_SSID = "  ";
+const char* WIFI_PASSWORD = "  ";
+
+// =====================================================
+// EMQX CLOUD
+// =====================================================
+
+const char* MQTT_HOST = "  ";
+const int MQTT_PORT = ;
+
+const char* MQTT_USER = "  ";
+const char* MQTT_PASSWORD = "  ";
+
+// =====================================================
+// PINES
+// =====================================================
+
+#define DHT_PIN       32
+#define DHT_TYPE      DHT11
+
+#define IR_PIN         5
+#define RELAY_PIN     19
+#define BUTTON_PIN    16
+
+// =====================================================
+// TOPICOS MQTT
+// =====================================================
+
+const char* TOPIC_TEMPERATURA =
+  "esp32/proyecto/temperatura";
+
+const char* TOPIC_HUMEDAD =
+  "esp32/proyecto/humedad";
+
+const char* TOPIC_IR =
+  "esp32/proyecto/infrarrojo";
+
+const char* TOPIC_RELAY =
+  "esp32/proyecto/relay";
+
+const char* TOPIC_RELAY_SET =
+  "esp32/proyecto/relay/set";
+
+// =====================================================
+// OBJETOS
+// =====================================================
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+WiFiClientSecure espClient;
+PubSubClient mqttClient(espClient);
+
+// =====================================================
+// RELAY
+// =====================================================
+
+// Relay normalmente activo en HIGH, PERO SE PUEDE MODIFICAR
+
+#define RELAY_ON  HIGH
+#define RELAY_OFF LOW
+bool relayState = false;
+
+// =====================================================
+// BOTON
+// =====================================================
+
+// Como tenemos PULL-DOWN externo:
+// LOW  = boton NO presionado
+// HIGH = boton PRESIONADO
+
+bool lastButtonState = LOW;
+
+// =====================================================
+// CONECTAR WIFI
+// =====================================================
+
+void conectarWiFi() {
+
+  Serial.println();
+  Serial.print("Conectando a WiFi: ");
+  Serial.println(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi conectado");
+
+  Serial.print("IP del ESP32: ");
+  Serial.println(WiFi.localIP());
+}
+
+// =====================================================
+// PUBLICAR ESTADO DEL RELAY
+// =====================================================
+
+void publicarRelay() {
+
+  if (relayState) {
+
+    mqttClient.publish(
+      TOPIC_RELAY,
+      "ON",
+      true
+    );
+
+    Serial.println("MQTT -> Relay: ON");
+  }
+
+  else {
+
+    mqttClient.publish(
+      TOPIC_RELAY,
+      "OFF",
+      true
+    );
+
+    Serial.println("MQTT -> Relay: OFF");
+  }
+}
+
+// =====================================================
+// CAMBIAR ESTADO DEL RELAY
+// =====================================================
+
+void cambiarRelay(bool estado) {
+
+  relayState = estado;
+
+  if (relayState) {
+
+    digitalWrite(
+      RELAY_PIN,
+      RELAY_ON
+    );
+  }
+
+  else {
+
+    digitalWrite(
+      RELAY_PIN,
+      RELAY_OFF
+    );
+  }
+
+  publicarRelay();
+}
+
+// =====================================================
+// MENSAJES MQTT RECIBIDOS
+// =====================================================
+
+void mqttCallback(
+  char* topic,
+  byte* payload,
+  unsigned int length
+) {
+
+  String mensaje = "";
+
+  for (unsigned int i = 0; i < length; i++) {
+
+    mensaje += (char)payload[i];
+  }
+
+  Serial.println();
+  Serial.println("========== MQTT RECIBIDO ==========");
+
+  Serial.print("Topic: ");
+  Serial.println(topic);
+
+  Serial.print("Mensaje: ");
+  Serial.println(mensaje);
+
+  // ==============================================
+  // CONTROL DEL RELAY DESDE APP INVENTOR / MQTTX
+  // ==============================================
+
+  if (String(topic) == TOPIC_RELAY_SET) {
+
+    if (mensaje == "ON") {
+
+      cambiarRelay(true);
+    }
+
+    else if (mensaje == "OFF") {
+
+      cambiarRelay(false);
+    }
+  }
+}
+
+// =====================================================
+// CONECTAR MQTT
+// =====================================================
+
+void conectarMQTT() {
+
+  while (!mqttClient.connected()) {
+
+    Serial.println();
+    Serial.print("Conectando a EMQX...");
+
+    String clientID = "ESP32-";
+
+    clientID += String(
+      (uint32_t)ESP.getEfuseMac(),
+      HEX
+    );
+
+    if (
+      mqttClient.connect(
+        clientID.c_str(),
+        MQTT_USER,
+        MQTT_PASSWORD
+      )
+    ) {
+
+      Serial.println(" OK");
+
+      // Suscripción para recibir órdenes
+      mqttClient.subscribe(
+        TOPIC_RELAY_SET
+      );
+
+      // Publicar estado inicial
+      publicarRelay();
+    }
+
+    else {
+
+      Serial.print(" ERROR, codigo=");
+      Serial.println(
+        mqttClient.state()
+      );
+
+      delay(5000);
+    }
+  }
+}
+
+// =====================================================
+// LEER DHT11
+// =====================================================
+
+void leerDHT11() {
+
+  float humedad = dht.readHumidity();
+
+  float temperatura =
+    dht.readTemperature();
+
+  if (
+    isnan(humedad) ||
+    isnan(temperatura)
+  ) {
+
+    Serial.println(
+      "Error leyendo DHT11"
+    );
+
+    return;
+  }
+
+  Serial.print("Temperatura: ");
+  Serial.print(temperatura);
+  Serial.println(" °C");
+
+  Serial.print("Humedad: ");
+  Serial.print(humedad);
+  Serial.println(" %");
+
+  // ----------------------------------------------
+  // Convertir valores a texto
+  // ----------------------------------------------
+
+  char temperaturaTexto[10];
+
+  char humedadTexto[10];
+
+  dtostrf(
+    temperatura,
+    1,
+    1,
+    temperaturaTexto
+  );
+
+  dtostrf(
+    humedad,
+    1,
+    1,
+    humedadTexto
+  );
+
+  // ----------------------------------------------
+  // Publicar temperatura
+  // ----------------------------------------------
+
+  mqttClient.publish(
+    TOPIC_TEMPERATURA,
+    temperaturaTexto,
+    true
+  );
+
+  // ----------------------------------------------
+  // Publicar humedad
+  // ----------------------------------------------
+
+  mqttClient.publish(
+    TOPIC_HUMEDAD,
+    humedadTexto,
+    true
+  );
+}
+
+// =====================================================
+// LEER SENSOR INFRARROJO
+// =====================================================
+
+void leerIR() {
+
+  int estadoIR =
+    digitalRead(IR_PIN);
+
+  // La mayoría de módulos IR:
+  // LOW = objeto detectado
+
+  if (estadoIR == LOW) {
+
+    mqttClient.publish(
+      TOPIC_IR,
+      "DETECTADO",
+      true
+    );
+
+    Serial.println(
+      "IR: DETECTADO"
+    );
+  }
+
+  else {
+
+    mqttClient.publish(
+      TOPIC_IR,
+      "NO_DETECTADO",
+      true
+    );
+
+    Serial.println(
+      "IR: NO DETECTADO"
+    );
+  }
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // ================================================
+  // CONFIGURAR PINES
+  // ================================================
+
+  pinMode(
+    IR_PIN,
+    INPUT
+  );
+
+  pinMode(
+    RELAY_PIN,
+    OUTPUT
+  );
+
+  // IMPORTANTE:
+  // Tenemos PULL-DOWN externo.
+  // NO usamos INPUT_PULLUP.
+
+  pinMode(
+    BUTTON_PIN,
+    INPUT
+  );
+
+  // ================================================
+  // RELAY APAGADO AL INICIAR
+  // ================================================
+
+  digitalWrite(
+    RELAY_PIN,
+    RELAY_OFF
+  );
+
+  relayState = false;
+
+  // ================================================
+  // INICIAR DHT11
+  // ================================================
+
+  dht.begin();
+
+  // ================================================
+  // CONECTAR WIFI
+  // ================================================
+
+  conectarWiFi();
+
+  // ================================================
+  // TLS
+  // ================================================
+  //
+  // PRUEBA INICIAL
+  //
+  // Más adelante instalaremos el certificado CA
+  // de EMQX para dejar TLS completamente verificado.
+  //
+
+  espClient.setInsecure();
+
+  // ================================================
+  // CONFIGURAR MQTT
+  // ================================================
+
+  mqttClient.setServer(
+    MQTT_HOST,
+    MQTT_PORT
+  );
+
+  mqttClient.setCallback(
+    mqttCallback
+  );
+
+  mqttClient.setBufferSize(512);
+
+  // ================================================
+  // CONECTAR MQTT
+  // ================================================
+
+  conectarMQTT();
+
+  Serial.println();
+  Serial.println(
+    "=============================="
+  );
+
+  Serial.println(
+    "     ESP32 MQTT INICIADO"
+  );
+
+  Serial.println(
+    "=============================="
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  // ================================================
+  // MANTENER MQTT CONECTADO
+  // ================================================
+
+  if (!mqttClient.connected()) {
+
+    conectarMQTT();
+  }
+
+  mqttClient.loop();
+
+  // ================================================
+  // BOTON FISICO
+  // ================================================
+
+  bool buttonState =
+    digitalRead(BUTTON_PIN);
+
+  // -----------------------------------------------
+  // Detectar transición:
+  //
+  // LOW  -> HIGH
+  //
+  // Es decir, se acaba de presionar el botón.
+  // -----------------------------------------------
+
+  if (
+    buttonState == HIGH &&
+    lastButtonState == LOW
+  ) {
+
+    // Pequeño debounce
+    delay(30);
+
+    // Confirmar que sigue presionado
+    if (
+      digitalRead(BUTTON_PIN) == HIGH
+    ) {
+
+      // Cambiar estado del relay
+      cambiarRelay(!relayState);
+
+      Serial.println(
+        "BOTON FISICO PULSADO"
+      );
+
+      // Esperar a que se suelte
+      while (
+        digitalRead(BUTTON_PIN) == HIGH
+      ) {
+
+        delay(10);
+      }
+    }
+  }
+
+  // Guardar estado actual
+  lastButtonState =
+    buttonState;
+
+  // ================================================
+  // DHT11
+  // ================================================
+
+  static unsigned long tiempoDHT = 0;
+
+  if (
+    millis() - tiempoDHT >= 3000
+  ) {
+
+    tiempoDHT = millis();
+
+    leerDHT11();
+  }
+
+  // ================================================
+  // SENSOR IR
+  // ================================================
+
+  static unsigned long tiempoIR = 0;
+
+  if (
+    millis() - tiempoIR >= 1000
+  ) {
+
+    tiempoIR = millis();
+
+    leerIR();
+  }
+}
