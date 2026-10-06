@@ -1,0 +1,727 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+
+// =====================================================
+// WIFI
+// =====================================================
+
+const char* WIFI_SSID = "  ";
+const char* WIFI_PASSWORD = "  ";
+
+// =====================================================
+// EMQX
+// =====================================================
+
+const char* MQTT_HOST = "   ";
+const int MQTT_PORT =  ;
+
+const char* MQTT_USER = "  ";
+const char* MQTT_PASSWORD = "  ";
+
+// =====================================================
+// PINES
+// =====================================================
+
+#define MQ135_PIN       35
+#define BUTTON_PIN      16
+#define BUZZER_PIN      15
+#define FLAME_PIN        4
+#define RELAY_PIN       19
+
+// =====================================================
+// TOPICS MQTT
+// =====================================================
+
+const char* TOPIC_MQ135 = "esp32/aire/mq135";
+const char* TOPIC_CONTAMINACION = "esp32/aire/contaminacion";
+const char* TOPIC_FLAMA = "esp32/aire/flama";
+const char* TOPIC_BUZZER = "esp32/aire/buzzer";
+const char* TOPIC_RELAY = "esp32/aire/relay";
+const char* TOPIC_RELAY_SET = "esp32/aire/relay/set";
+
+// =====================================================
+// OBJETOS
+// =====================================================
+
+WiFiClientSecure espClient;
+PubSubClient mqttClient(espClient);
+
+// =====================================================
+// RELAY
+// =====================================================
+
+#define RELAY_ON  HIGH
+#define RELAY_OFF LOW
+
+bool relayState = false;
+
+// =====================================================
+// BOTON
+// =====================================================
+
+bool lastButtonState = LOW;
+
+// =====================================================
+// MQ-135
+// =====================================================
+
+// Este valor es experimental.
+// NO representa ppm.
+
+const int UMBRAL_CONTAMINACION = 1800;
+
+int valorMQ135 = 0;
+bool contaminacionState = false;
+
+// =====================================================
+// FLAMA
+// =====================================================
+
+bool flamaState = false;
+
+// =====================================================
+// BUZZER
+// =====================================================
+
+bool buzzerState = false;
+
+const int FRECUENCIA_BUZZER = 2000;
+
+// =====================================================
+// CONECTAR WIFI
+// =====================================================
+
+void conectarWiFi() {
+
+  Serial.println();
+  Serial.print("Conectando a WiFi: ");
+  Serial.println(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi conectado");
+
+  Serial.print("IP del ESP32: ");
+  Serial.println(WiFi.localIP());
+}
+
+// =====================================================
+// PUBLICAR RELAY
+// =====================================================
+
+void publicarRelay() {
+
+  bool resultado;
+
+  if (relayState) {
+
+    resultado = mqttClient.publish(
+      TOPIC_RELAY,
+      "ON",
+      true
+    );
+
+    Serial.print("MQTT Relay -> ON : ");
+    
+  } else {
+
+    resultado = mqttClient.publish(
+      TOPIC_RELAY,
+      "OFF",
+      true
+    );
+
+    Serial.print("MQTT Relay -> OFF : ");
+  }
+
+  Serial.println(resultado ? "OK" : "ERROR");
+}
+
+// =====================================================
+// CAMBIAR RELAY
+// =====================================================
+
+void cambiarRelay(bool estado) {
+
+  relayState = estado;
+
+  if (relayState) {
+
+    digitalWrite(
+      RELAY_PIN,
+      RELAY_ON
+    );
+
+  } else {
+
+    digitalWrite(
+      RELAY_PIN,
+      RELAY_OFF
+    );
+  }
+
+  publicarRelay();
+}
+
+// =====================================================
+// PUBLICAR BUZZER
+// =====================================================
+
+void publicarBuzzer() {
+
+  bool resultado;
+
+  if (buzzerState) {
+
+    resultado = mqttClient.publish(
+      TOPIC_BUZZER,
+      "ON",
+      true
+    );
+
+    Serial.print("MQTT Buzzer -> ON : ");
+
+  } else {
+
+    resultado = mqttClient.publish(
+      TOPIC_BUZZER,
+      "OFF",
+      true
+    );
+
+    Serial.print("MQTT Buzzer -> OFF : ");
+  }
+
+  Serial.println(resultado ? "OK" : "ERROR");
+}
+
+// =====================================================
+// CONTROL BUZZER
+// =====================================================
+
+void controlarBuzzer(bool activar) {
+
+  if (activar) {
+
+    if (!buzzerState) {
+
+      buzzerState = true;
+
+      tone(
+        BUZZER_PIN,
+        FRECUENCIA_BUZZER
+      );
+
+      Serial.println("BUZZER: ON");
+    }
+
+  } else {
+
+    if (buzzerState) {
+
+      buzzerState = false;
+
+      noTone(BUZZER_PIN);
+
+      Serial.println("BUZZER: OFF");
+    }
+  }
+}
+
+// =====================================================
+// PUBLICAR MQ-135
+// =====================================================
+
+void publicarMQ135() {
+
+  char valorTexto[12];
+
+  itoa(
+    valorMQ135,
+    valorTexto,
+    10
+  );
+
+  bool resultado = mqttClient.publish(
+    TOPIC_MQ135,
+    valorTexto,
+    true
+  );
+
+  Serial.print("MQTT MQ135 -> ");
+  Serial.print(valorTexto);
+  Serial.print(" : ");
+  Serial.println(
+    resultado ? "OK" : "ERROR"
+  );
+}
+
+// =====================================================
+// PUBLICAR CONTAMINACION
+// =====================================================
+
+void publicarContaminacion() {
+
+  bool resultado;
+
+  if (contaminacionState) {
+
+    resultado = mqttClient.publish(
+      TOPIC_CONTAMINACION,
+      "DETECTADA",
+      true
+    );
+
+    Serial.print(
+      "MQTT Contaminacion -> DETECTADA : "
+    );
+
+  } else {
+
+    resultado = mqttClient.publish(
+      TOPIC_CONTAMINACION,
+      "NORMAL",
+      true
+    );
+
+    Serial.print(
+      "MQTT Contaminacion -> NORMAL : "
+    );
+  }
+
+  Serial.println(
+    resultado ? "OK" : "ERROR"
+  );
+}
+
+// =====================================================
+// PUBLICAR FLAMA
+// =====================================================
+
+void publicarFlama() {
+
+  bool resultado;
+
+  if (flamaState) {
+
+    resultado = mqttClient.publish(
+      TOPIC_FLAMA,
+      "DETECTADO",
+      true
+    );
+
+    Serial.print(
+      "MQTT Flama -> DETECTADO : "
+    );
+
+  } else {
+
+    resultado = mqttClient.publish(
+      TOPIC_FLAMA,
+      "NO_DETECTADO",
+      true
+    );
+
+    Serial.print(
+      "MQTT Flama -> NO_DETECTADO : "
+    );
+  }
+
+  Serial.println(
+    resultado ? "OK" : "ERROR"
+  );
+}
+
+// =====================================================
+// CALLBACK MQTT
+// =====================================================
+
+void mqttCallback(
+  char* topic,
+  byte* payload,
+  unsigned int length
+) {
+
+  String mensaje = "";
+
+  for (
+    unsigned int i = 0;
+    i < length;
+    i++
+  ) {
+
+    mensaje += (char)payload[i];
+  }
+
+  Serial.println();
+  Serial.println(
+    "========== MQTT RECIBIDO =========="
+  );
+
+  Serial.print("Topic: ");
+  Serial.println(topic);
+
+  Serial.print("Mensaje: ");
+  Serial.println(mensaje);
+
+  // ---------------------------------------------------
+  // CONTROL DEL RELAY DESDE MQTT
+  // ---------------------------------------------------
+
+  if (
+    String(topic) == TOPIC_RELAY_SET
+  ) {
+
+    if (mensaje == "ON") {
+
+      cambiarRelay(true);
+
+    } else if (mensaje == "OFF") {
+
+      cambiarRelay(false);
+    }
+  }
+}
+
+// =====================================================
+// CONECTAR MQTT
+// =====================================================
+
+void conectarMQTT() {
+
+  while (!mqttClient.connected()) {
+
+    Serial.println();
+    Serial.print("Conectando a EMQX...");
+
+    String clientID =
+      "ESP32-Aire-Fuego-";
+
+    clientID += String(
+      (uint32_t)ESP.getEfuseMac(),
+      HEX
+    );
+
+    if (
+      mqttClient.connect(
+        clientID.c_str(),
+        MQTT_USER,
+        MQTT_PASSWORD
+      )
+    ) {
+
+      Serial.println(" OK");
+
+      // Suscripción al control del relay
+      mqttClient.subscribe(
+        TOPIC_RELAY_SET
+      );
+
+      // Publicar estados iniciales
+      publicarRelay();
+      publicarBuzzer();
+
+    } else {
+
+      Serial.print(
+        " ERROR, codigo="
+      );
+
+      Serial.println(
+        mqttClient.state()
+      );
+
+      delay(5000);
+    }
+  }
+}
+
+// =====================================================
+// LEER MQ-135
+// =====================================================
+
+void leerMQ135() {
+
+  long suma = 0;
+
+  // Tomar 10 lecturas
+  for (int i = 0; i < 10; i++) {
+
+    suma += analogRead(MQ135_PIN);
+
+    delay(10);
+  }
+
+  valorMQ135 = suma / 10;
+
+  Serial.print("MQ-135: ");
+  Serial.println(valorMQ135);
+
+  // ---------------------------------------------------
+  // DETERMINAR CONTAMINACION
+  // ---------------------------------------------------
+
+  if (
+    valorMQ135 >=
+    UMBRAL_CONTAMINACION
+  ) {
+
+    contaminacionState = true;
+
+    Serial.println(
+      "CONTAMINACION: DETECTADA"
+    );
+
+    controlarBuzzer(true);
+
+  } else {
+
+    contaminacionState = false;
+
+    Serial.println(
+      "CONTAMINACION: NORMAL"
+    );
+
+    controlarBuzzer(false);
+  }
+
+  // Publicar inmediatamente
+  publicarMQ135();
+  publicarContaminacion();
+  publicarBuzzer();
+}
+
+// =====================================================
+// LEER SENSOR DE FLAMA
+// =====================================================
+
+void leerFlama() {
+
+  int estadoFlama =
+    digitalRead(FLAME_PIN);
+
+  if (estadoFlama == LOW) {
+
+    flamaState = true;
+
+    Serial.println(
+      "FLAMA: DETECTADA"
+    );
+
+  } else {
+
+    flamaState = false;
+
+    Serial.println(
+      "FLAMA: NO DETECTADA"
+    );
+  }
+
+  publicarFlama();
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // ---------------------------------------------------
+  // PINES
+  // ---------------------------------------------------
+
+  pinMode(
+    MQ135_PIN,
+    INPUT
+  );
+
+  pinMode(
+    BUTTON_PIN,
+    INPUT
+  );
+
+  pinMode(
+    FLAME_PIN,
+    INPUT
+  );
+
+  pinMode(
+    BUZZER_PIN,
+    OUTPUT
+  );
+
+  pinMode(
+    RELAY_PIN,
+    OUTPUT
+  );
+
+  // ---------------------------------------------------
+  // ESTADOS INICIALES
+  // ---------------------------------------------------
+
+  digitalWrite(
+    RELAY_PIN,
+    RELAY_OFF
+  );
+
+  noTone(BUZZER_PIN);
+
+  relayState = false;
+  buzzerState = false;
+  lastButtonState = LOW;
+
+  // ---------------------------------------------------
+  // ADC ESP32
+  // ---------------------------------------------------
+
+  analogReadResolution(12);
+
+  // Permitir medir un rango mayor de entrada ADC
+  analogSetPinAttenuation(
+    MQ135_PIN,
+    ADC_11db
+  );
+
+  // ---------------------------------------------------
+  // WIFI
+  // ---------------------------------------------------
+
+  conectarWiFi();
+
+  // ---------------------------------------------------
+  // TLS
+  // ---------------------------------------------------
+
+  espClient.setInsecure();
+
+  // ---------------------------------------------------
+  // MQTT
+  // ---------------------------------------------------
+
+  mqttClient.setServer(
+    MQTT_HOST,
+    MQTT_PORT
+  );
+
+  mqttClient.setCallback(
+    mqttCallback
+  );
+
+  mqttClient.setBufferSize(512);
+
+  conectarMQTT();
+
+  // ---------------------------------------------------
+  // MENSAJE DE INICIO
+  // ---------------------------------------------------
+
+  Serial.println();
+  Serial.println(
+    "=============================="
+  );
+  Serial.println(
+    "      ESP32 AIRE Y FUEGO"
+  );
+  Serial.println(
+    "=============================="
+  );
+  Serial.println();
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  // ---------------------------------------------------
+  // MQTT
+  // ---------------------------------------------------
+
+  if (!mqttClient.connected()) {
+
+    conectarMQTT();
+  }
+
+  mqttClient.loop();
+
+  // ---------------------------------------------------
+  // PULSADOR
+  // ---------------------------------------------------
+
+  bool buttonState =
+    digitalRead(BUTTON_PIN);
+
+  if (
+    buttonState == HIGH &&
+    lastButtonState == LOW
+  ) {
+
+    delay(30);
+
+    if (
+      digitalRead(BUTTON_PIN) == HIGH
+    ) {
+
+      cambiarRelay(!relayState);
+
+      Serial.println(
+        "BOTON FISICO PULSADO"
+      );
+
+      while (
+        digitalRead(BUTTON_PIN) == HIGH
+      ) {
+
+        delay(10);
+      }
+    }
+  }
+
+  lastButtonState =
+    buttonState;
+
+  // ---------------------------------------------------
+  // MQ-135
+  // ---------------------------------------------------
+
+  static unsigned long
+    tiempoMQ135 = 0;
+
+  if (
+    millis() - tiempoMQ135 >=
+    2000
+  ) {
+
+    tiempoMQ135 = millis();
+
+    leerMQ135();
+  }
+
+  // ---------------------------------------------------
+  // FLAMA
+  // ---------------------------------------------------
+
+  static unsigned long
+    tiempoFlama = 0;
+
+  if (
+    millis() - tiempoFlama >=
+    1000
+  ) {
+
+    tiempoFlama = millis();
+
+    leerFlama();
+  }
+}
