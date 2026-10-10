@@ -1,0 +1,850 @@
+#include <WiFi.h>
+
+#include <WiFiClientSecure.h>
+
+#include <HTTPClient.h>
+
+#include <Wire.h>
+
+#include <DHT.h>
+
+#include <RTClib.h>
+
+#include <time.h>
+
+
+
+// =====================================================
+
+// 1. WIFI Y FIREBASE
+
+// =====================================================
+
+
+
+const char* WIFI_SSID = "  ";
+
+const char* WIFI_PASSWORD = "  ";
+
+
+
+const char* FIREBASE_URL =
+
+  " ";
+
+
+
+const char* FIREBASE_ROOT = " ";
+
+
+
+// =====================================================
+
+// 2. PINES
+
+// =====================================================
+
+
+
+const uint8_t PIN_DHT = 32;
+
+const uint8_t PIN_MQ135 = 35;
+
+const uint8_t PIN_RELE = 19;
+
+const uint8_t PIN_PIR = 5;
+#define DHTTYPE DHT11
+
+
+
+DHT dht(PIN_DHT, DHTTYPE);
+
+RTC_DS1307 rtc;
+
+
+
+// =====================================================
+
+// 3. UMBRALES Y PERIODOS
+
+// =====================================================
+
+
+
+const int UMBRAL_ALTO = 2200;
+
+const int UMBRAL_BAJO = 1900;
+
+
+
+const unsigned long INTERVALO_SENSORES = 3000;
+// =====================================================
+
+// 4. VARIABLES DEL SISTEMA
+
+// =====================================================
+bool releEncendido = false;
+
+bool alarmaAire = false;
+
+bool movimiento = false;
+
+
+
+bool rtcDisponible = false;
+
+bool ntpSincronizado = false;
+
+
+
+int lecturaMQ135 = 0;
+
+
+
+float temperatura = NAN;
+
+float humedad = NAN;
+
+
+
+String fechaActual = "SIN_FECHA";
+
+String horaActual = "SIN_HORA";
+unsigned long ultimoEnvioSensores = 0;
+
+
+
+
+// =====================================================
+
+// 6. FUNCIONES FIREBASE
+
+// =====================================================
+
+
+
+String firebaseGET(const String& ruta) {
+
+  if (WiFi.status() != WL_CONNECTED) {
+
+    return "";
+
+  }
+
+
+
+  WiFiClientSecure cliente;
+
+  cliente.setInsecure();
+
+
+
+  HTTPClient http;
+
+
+
+  String url = String(FIREBASE_URL) +
+
+               String(FIREBASE_ROOT) +
+
+               ruta + ".json";
+
+
+
+  if (!http.begin(cliente, url)) {
+
+    return "";
+
+  }
+
+
+
+  http.setTimeout(2500);
+
+
+
+  int codigo = http.GET();
+
+  String respuesta = "";
+
+
+
+  if (codigo == HTTP_CODE_OK) {
+
+    respuesta = http.getString();
+
+    respuesta.trim();
+
+
+
+    // Firebase devuelve las cadenas JSON entre comillas.
+
+    if (respuesta.length() >= 2 &&
+
+        respuesta[0] == '"' &&
+
+        respuesta[respuesta.length() - 1] == '"') {
+
+      respuesta = respuesta.substring(
+
+        1, respuesta.length() - 1
+
+      );
+
+    }
+
+  } else if (codigo < 0) {
+
+    Serial.print("Error GET Firebase: ");
+
+    Serial.println(codigo);
+
+  }
+
+
+
+  http.end();
+
+  return respuesta;
+
+}
+
+
+
+bool firebasePUT(const String& ruta, const String& json) {
+
+  if (WiFi.status() != WL_CONNECTED) {
+
+    return false;
+
+  }
+
+
+
+  WiFiClientSecure cliente;
+
+  cliente.setInsecure();
+
+
+
+  HTTPClient http;
+
+
+
+  String url = String(FIREBASE_URL) +
+
+               String(FIREBASE_ROOT) +
+
+               ruta + ".json";
+
+
+
+  if (!http.begin(cliente, url)) {
+
+    return false;
+
+  }
+
+
+
+  http.addHeader("Content-Type", "application/json");
+
+  http.setTimeout(2500);
+
+
+
+  int codigo = http.PUT(json);
+
+
+
+  if (codigo < 200 || codigo >= 300) {
+
+    Serial.print("Error PUT Firebase: ");
+
+    Serial.println(codigo);
+
+  }
+
+
+
+  http.end();
+
+
+
+  return codigo >= 200 && codigo < 300;
+
+}
+
+
+
+bool firebasePUTTexto(const String& ruta,
+
+                      const String& valor) {
+
+  return firebasePUT(ruta, "\"" + valor + "\"");
+
+}
+
+
+
+// =====================================================
+
+// 7. RTC Y NTP
+
+// =====================================================
+
+
+
+void actualizarFechaHora() {
+
+  struct tm tiempoLocal;
+
+
+
+  if (getLocalTime(&tiempoLocal, 100)) {
+
+    char fecha[11];
+
+    char hora[9];
+
+
+
+    strftime(fecha, sizeof(fecha),
+
+             "%Y-%m-%d", &tiempoLocal);
+
+
+
+    strftime(hora, sizeof(hora),
+
+             "%H:%M:%S", &tiempoLocal);
+
+
+
+    fechaActual = String(fecha);
+
+    horaActual = String(hora);
+
+
+
+    if (rtcDisponible && !ntpSincronizado) {
+
+      rtc.adjust(DateTime(
+
+        tiempoLocal.tm_year + 1900,
+
+        tiempoLocal.tm_mon + 1,
+
+        tiempoLocal.tm_mday,
+
+        tiempoLocal.tm_hour,
+
+        tiempoLocal.tm_min,
+
+        tiempoLocal.tm_sec
+
+      ));
+
+
+
+      ntpSincronizado = true;
+
+      Serial.println("RTC sincronizado con NTP");
+
+    }
+
+
+
+    return;
+
+  }
+
+
+
+  if (rtcDisponible) {
+
+    DateTime ahora = rtc.now();
+
+
+
+    if (ahora.year() >= 2024 &&
+
+        ahora.month() >= 1 &&
+
+        ahora.month() <= 12 &&
+
+        ahora.day() >= 1 &&
+
+        ahora.day() <= 31) {
+
+
+
+      char fecha[11];
+
+      char hora[9];
+
+
+
+      snprintf(fecha, sizeof(fecha),
+
+               "%04d-%02d-%02d",
+
+               ahora.year(), ahora.month(),
+
+               ahora.day());
+
+
+
+      snprintf(hora, sizeof(hora),
+
+               "%02d:%02d:%02d",
+
+               ahora.hour(), ahora.minute(),
+
+               ahora.second());
+
+
+
+      fechaActual = String(fecha);
+
+      horaActual = String(hora);
+
+      return;
+
+    }
+
+  }
+
+
+
+  fechaActual = "SIN_FECHA";
+
+  horaActual = "SIN_HORA";
+
+}
+
+
+
+// =====================================================
+
+// 7. CONTROL DEL RELE SOLO POR MQ135
+
+// =====================================================
+
+
+
+void actualizarRele() {
+  // El rele depende exclusivamente de la alarma del MQ135.
+  releEncendido = alarmaAire;
+  digitalWrite(PIN_RELE, releEncendido ? HIGH : LOW);
+}
+
+
+
+// =====================================================
+
+// 8. LECTURA DE SENSORES
+
+// =====================================================
+
+
+
+void leerSensores() {
+
+  float nuevaTemperatura = dht.readTemperature();
+
+  float nuevaHumedad = dht.readHumidity();
+
+
+
+  if (!isnan(nuevaTemperatura)) {
+
+    temperatura = nuevaTemperatura;
+
+  }
+
+
+
+  if (!isnan(nuevaHumedad)) {
+
+    humedad = nuevaHumedad;
+
+  }
+
+
+
+  lecturaMQ135 = analogRead(PIN_MQ135);
+
+  movimiento = digitalRead(PIN_PIR) == HIGH;
+
+
+
+  // Histéresis del MQ135.
+
+  if (lecturaMQ135 >= UMBRAL_ALTO) {
+
+    alarmaAire = true;
+
+  } else if (lecturaMQ135 <= UMBRAL_BAJO) {
+
+    alarmaAire = false;
+
+  }
+
+
+
+  actualizarFechaHora();
+
+  actualizarRele();
+
+}
+
+
+
+// =====================================================
+
+// =====================================================
+
+// 9. PUBLICAR SENSORES
+
+// =====================================================
+
+
+
+void publicarSensores() {
+
+  String json = "{";
+
+
+
+  json += "\"temperatura\":";
+
+  json += isnan(temperatura)
+
+          ? "null" : String(temperatura, 1);
+
+
+
+  json += ",\"humedad\":";
+
+  json += isnan(humedad)
+
+          ? "null" : String(humedad, 1);
+
+
+
+  json += ",\"mq135\":";
+
+  json += String(lecturaMQ135);
+
+
+
+  json += ",\"calidadAire\":\"";
+
+  json += alarmaAire ? "ALERTA" : "NORMAL";
+
+  json += "\"";
+
+
+
+  json += ",\"movimiento\":\"";
+
+  json += movimiento ? "SI" : "NO";
+
+  json += "\"";
+
+
+
+  json += ",\"fecha\":\"";
+
+  json += fechaActual;
+
+  json += "\"";
+
+
+
+  json += ",\"hora\":\"";
+
+  json += horaActual;
+
+  json += "\"";
+
+
+
+  json += "}";
+
+
+
+  bool correcto = firebasePUT("/sensores", json);
+
+
+
+  Serial.print("Publicacion sensores: ");
+
+  Serial.println(correcto ? "OK" : "ERROR");
+
+}
+
+
+
+// =====================================================
+
+// 10. PUBLICAR ESTADO
+
+// =====================================================
+
+
+
+void publicarEstado() {
+  String json = "{";
+
+  json += "\"rele\":\"";
+  json += releEncendido ? "ON" : "OFF";
+  json += "\"";
+
+  json += ",\"alarmaAire\":\"";
+  json += alarmaAire ? "ACTIVA" : "NORMAL";
+  json += "\"";
+
+  json += ",\"modo\":\"MQ135\"";
+
+  json += ",\"fuenteRele\":\"";
+  json += alarmaAire ? "MQ135" : "NINGUNA";
+  json += "\"";
+
+  json += "}";
+
+  bool correcto = firebasePUT("/estado", json);
+
+  Serial.print("Publicacion estado: ");
+  Serial.println(correcto ? "OK" : "ERROR");
+}
+
+
+
+// =====================================================
+
+// 11. CONECTAR WIFI
+
+// =====================================================
+
+
+
+void conectarWiFi() {
+
+  WiFi.mode(WIFI_STA);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+
+
+  Serial.print("Conectando a WiFi");
+
+
+
+  unsigned long inicio = millis();
+
+
+
+  while (WiFi.status() != WL_CONNECTED &&
+
+         millis() - inicio < 15000) {
+
+    delay(500);
+
+    Serial.print(".");
+
+  }
+
+
+
+  Serial.println();
+
+
+
+  if (WiFi.status() == WL_CONNECTED) {
+
+    Serial.print("WiFi conectado. IP: ");
+
+    Serial.println(WiFi.localIP());
+
+  } else {
+
+    Serial.println("WiFi no conectado; se reintentara");
+
+  }
+
+}
+
+
+
+// =====================================================
+
+// 12. SETUP
+
+// =====================================================
+
+
+
+void setup() {
+
+  Serial.begin(115200);
+  pinMode(PIN_RELE, OUTPUT);
+
+  pinMode(PIN_PIR, INPUT);
+
+
+
+  // Relé apagado durante el arranque.
+
+  digitalWrite(PIN_RELE, LOW);
+
+
+
+  analogReadResolution(12);
+
+  analogSetPinAttenuation(PIN_MQ135, ADC_11db);
+
+
+
+  dht.begin();
+
+
+
+  Wire.begin(21, 22);
+
+  rtcDisponible = rtc.begin();
+
+
+
+  if (rtcDisponible) {
+
+    Serial.println("RTC DS1307 detectado");
+
+  } else {
+
+    Serial.println("ERROR: no se detecta RTC");
+
+  }
+  conectarWiFi();
+
+
+
+  configTzTime(
+
+    "BOT4",
+
+    "pool.ntp.org",
+
+    "time.nist.gov"
+
+  );
+
+
+
+  Serial.println("Esperando sincronizacion NTP");
+
+
+
+  struct tm tiempoLocal;
+
+
+
+  if (getLocalTime(&tiempoLocal, 10000)) {
+
+    actualizarFechaHora();
+
+    Serial.println("NTP sincronizado");
+
+  } else {
+
+    Serial.println("NTP no disponible; se usara RTC");
+
+  }
+
+
+
+  leerSensores();
+
+  actualizarRele();
+
+
+
+  if (WiFi.status() == WL_CONNECTED) {
+    publicarSensores();
+
+    publicarEstado();
+
+  }
+
+
+
+  Serial.println("Sistema IoT iniciado");
+
+  Serial.println("Modo de control: SOLO MQ135");
+
+}
+
+
+
+// =====================================================
+
+// 13. LOOP PRINCIPAL
+
+// =====================================================
+
+
+
+void loop() {
+
+  if (WiFi.status() != WL_CONNECTED) {
+
+    conectarWiFi();
+
+  }
+  unsigned long ahora = millis();
+
+  // Actualizar sensores y publicar cada tres segundos.
+
+  if (ahora - ultimoEnvioSensores >= INTERVALO_SENSORES) {
+
+    ultimoEnvioSensores = ahora;
+
+
+
+    leerSensores();
+
+    actualizarRele();
+
+
+
+    if (WiFi.status() == WL_CONNECTED) {
+
+      publicarSensores();
+
+      publicarEstado();
+
+    }
+
+
+
+    Serial.print("MQ135: ");
+
+    Serial.print(lecturaMQ135);
+
+
+
+    Serial.print(" | Alarma: ");
+
+    Serial.print(alarmaAire ? "ACTIVA" : "NORMAL");
+    Serial.print(" | Rele: ");
+
+    Serial.println(releEncendido ? "ON" : "OFF");
+
+  }
+
+
+
+  delay(5);
+
+}
