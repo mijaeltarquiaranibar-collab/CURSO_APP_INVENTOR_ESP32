@@ -34,7 +34,7 @@ const char* FIREBASE_URL =
 
 
 
-const char* FIREBASE_ROOT = " ";
+const char* FIREBASE_ROOT = "/ ";
 
 
 
